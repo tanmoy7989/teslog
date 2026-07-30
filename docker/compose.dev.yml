@@ -1,0 +1,9 @@
+# Mac development overrides — use with:
+#   docker compose -f docker/compose.yml -f docker/compose.dev.yml up -d
+
+services:
+  teslog:
+    volumes:
+      - ../src:/app/src:ro
+    environment:
+      TESLOG_RELOAD: "true"

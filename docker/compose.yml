@@ -1,0 +1,119 @@
+services:
+  teslamate:
+    image: teslamate/teslamate:latest
+    restart: unless-stopped
+    environment:
+      ENCRYPTION_KEY: ${TM_ENCRYPTION_KEY}
+      DATABASE_USER: ${TM_DB_USER}
+      DATABASE_PASS: ${TM_DB_PASS}
+      DATABASE_NAME: ${TM_DB_NAME}
+      DATABASE_HOST: database
+      MQTT_HOST: mosquitto
+      TZ: ${TM_TZ}
+      CHECK_ORIGIN: "false"
+    ports:
+      - "4000:4000"
+    volumes:
+      - ../data/teslamate-import:/opt/app/import
+    cap_drop:
+      - ALL
+    depends_on:
+      database:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+
+  database:
+    image: postgres:18-trixie
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${TM_DB_USER}
+      POSTGRES_PASSWORD: ${TM_DB_PASS}
+      POSTGRES_DB: ${TM_DB_NAME}
+      TESLOG_DB_USER: ${TESLOG_DB_USER}
+      TESLOG_DB_PASS: ${TESLOG_DB_PASS}
+      TESLOG_DB_NAME: ${TESLOG_DB_NAME}
+    volumes:
+      - ../data/postgres:/var/lib/postgresql
+      - ./init-db.sh:/docker-entrypoint-initdb.d/init-teslog-db.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${TM_DB_USER} -d ${TM_DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  grafana:
+    image: teslamate/grafana:latest
+    restart: unless-stopped
+    environment:
+      DATABASE_USER: ${TM_DB_USER}
+      DATABASE_PASS: ${TM_DB_PASS}
+      DATABASE_NAME: ${TM_DB_NAME}
+      DATABASE_HOST: database
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PW}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../data/grafana:/var/lib/grafana
+    depends_on:
+      database:
+        condition: service_healthy
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    ports:
+      - "1883:1883"
+
+  teslamateapi:
+    image: tobiasehlert/teslamateapi:latest
+    restart: unless-stopped
+    environment:
+      ENCRYPTION_KEY: ${TM_ENCRYPTION_KEY}
+      DATABASE_USER: ${TM_DB_USER}
+      DATABASE_PASS: ${TM_DB_PASS}
+      DATABASE_NAME: ${TM_DB_NAME}
+      DATABASE_HOST: database
+      MQTT_HOST: mosquitto
+      TZ: ${TM_TZ}
+    ports:
+      - "8081:8080"
+    depends_on:
+      database:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+
+  teslog:
+    build:
+      context: ..
+      dockerfile: docker/teslog/Dockerfile
+    restart: unless-stopped
+    environment:
+      TM_DB_HOST: database
+      TM_DB_PORT: 5432
+      TM_DB_USER: ${TM_DB_USER}
+      TM_DB_PASS: ${TM_DB_PASS}
+      TM_DB_NAME: ${TM_DB_NAME}
+      TESLOG_DB_HOST: database
+      TESLOG_DB_PORT: 5432
+      TESLOG_DB_USER: ${TESLOG_DB_USER}
+      TESLOG_DB_PASS: ${TESLOG_DB_PASS}
+      TESLOG_DB_NAME: ${TESLOG_DB_NAME}
+      TESLAMATE_API_URL: ${TESLAMATE_API_URL:-http://teslamateapi:8080}
+      OSRM_BASE_URL: ${OSRM_BASE_URL:-https://router.project-osrm.org}
+      TESLOG_CAR_ID: ${TESLOG_CAR_ID:-1}
+      TESLOG_HOST: ${TESLOG_HOST:-0.0.0.0}
+      TESLOG_PORT: ${TESLOG_PORT:-8080}
+      TESLOG_SYNC_INTERVAL_SECONDS: ${TESLOG_SYNC_INTERVAL_SECONDS:-900}
+      TM_TZ: ${TM_TZ}
+    ports:
+      - "${TESLOG_PORT:-8080}:8080"
+    depends_on:
+      database:
+        condition: service_healthy
+      teslamateapi:
+        condition: service_started
