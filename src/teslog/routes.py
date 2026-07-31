@@ -1,18 +1,22 @@
 import csv
 import io
+import pathlib
 from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, Response
+from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from teslog import metrics
-from teslog.clients.teslamate_api import TeslaMateApiClient
+from teslog.clients import TeslaMateApiClient
 from teslog.config import get_settings
 from teslog.db import get_teslog_sessionmaker, get_tm_sessionmaker
 from teslog.services.sync import run_sync_once
-from teslog.templating import templates
+
+TEMPLATES_DIR = pathlib.Path(__file__).resolve().parent / "dashboard" / "templates"
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 public_router = APIRouter()
 router = APIRouter()

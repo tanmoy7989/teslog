@@ -13,7 +13,7 @@ import httpx
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from teslog.clients.teslamate_api import TeslaMateApiClient
+from teslog.clients import TeslaMateApiClient
 from teslog.db import DriveRouteComparison
 
 # --- Distance (Teslog DB) ----------------------------------------------------

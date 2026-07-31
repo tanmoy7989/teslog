@@ -23,6 +23,9 @@ dependencies = [
 # Only used by scripts/get-tesla-tokens.sh to auto-submit tokens into
 # TeslaMate's sign-in page — not needed by the app itself.
 auth = ["playwright>=1.40,<2"]
+# Only used by tests/ — spins up real ephemeral Postgres containers and a
+# real browser to exercise the actual app, not needed to run the app itself.
+test = ["pytest>=8", "testcontainers[postgres]>=4.9", "playwright>=1.40,<2"]
 
 [project.scripts]
 teslog = "teslog.cli:main"
@@ -31,7 +34,7 @@ teslog = "teslog.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-teslog = ["templates/**/*", "static/**/*"]
+teslog = ["dashboard/**/*"]
 
 [tool.ruff]
 line-length = 100

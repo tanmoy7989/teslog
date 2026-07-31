@@ -2,7 +2,7 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from teslog.clients.osrm import OSRMClient, OSRMError
+from teslog.clients import OSRMClient, OSRMError
 from teslog.db import DriveRouteComparison
 from teslog.services.drives import DriveRecord
 from teslog.services.positions import get_drive_positions, gps_trace_distance_km

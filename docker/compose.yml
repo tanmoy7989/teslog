@@ -8,7 +8,7 @@ services:
       DATABASE_PASS: ${TM_DB_PASS}
       DATABASE_NAME: ${TM_DB_NAME}
       DATABASE_HOST: database
-      MQTT_HOST: mosquitto
+      DISABLE_MQTT: "true"
       TZ: ${TM_TZ}
       CHECK_ORIGIN: "false"
     ports:
@@ -20,8 +20,6 @@ services:
     depends_on:
       database:
         condition: service_healthy
-      mosquitto:
-        condition: service_started
 
   database:
     image: postgres:18-trixie
@@ -42,32 +40,6 @@ services:
       timeout: 5s
       retries: 5
 
-  grafana:
-    image: teslamate/grafana:latest
-    restart: unless-stopped
-    environment:
-      DATABASE_USER: ${TM_DB_USER}
-      DATABASE_PASS: ${TM_DB_PASS}
-      DATABASE_NAME: ${TM_DB_NAME}
-      DATABASE_HOST: database
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PW}
-      GF_AUTH_ANONYMOUS_ENABLED: "false"
-    ports:
-      - "3000:3000"
-    volumes:
-      - ../data/grafana:/var/lib/grafana
-    depends_on:
-      database:
-        condition: service_healthy
-
-  mosquitto:
-    image: eclipse-mosquitto:2
-    restart: unless-stopped
-    volumes:
-      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
-    ports:
-      - "1883:1883"
-
   teslamateapi:
     image: tobiasehlert/teslamateapi:latest
     restart: unless-stopped
@@ -77,15 +49,13 @@ services:
       DATABASE_PASS: ${TM_DB_PASS}
       DATABASE_NAME: ${TM_DB_NAME}
       DATABASE_HOST: database
-      MQTT_HOST: mosquitto
+      DISABLE_MQTT: "true"
       TZ: ${TM_TZ}
     ports:
       - "8081:8080"
     depends_on:
       database:
         condition: service_healthy
-      mosquitto:
-        condition: service_started
 
   teslog:
     build:

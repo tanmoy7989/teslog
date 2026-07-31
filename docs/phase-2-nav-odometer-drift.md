@@ -25,7 +25,9 @@ Only the nav-session collector needs MQTT. The web UI and standard stats do not.
 
 - Phase 1 deployed and stable
 - Host runs 24/7 (Pi home server)
-- Docker stack includes Mosquitto (already in Phase 1 compose for TeslaMateApi live status)
+- Mosquitto added back to the compose stack — Phase 1 runs `DISABLE_MQTT=true` on both TeslaMate
+  and TeslaMateApi since nothing in Stage 1 needs it; Phase 2 needs a real broker, and TeslaMate/
+  TeslaMateApi need `DISABLE_MQTT` unset (or `false`) and `MQTT_HOST` pointed at it again
 - Teslog collector container runs continuously alongside TeslaMate
 
 ## Architecture

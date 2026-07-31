@@ -27,6 +27,5 @@ set_if_blank() {
 set_if_blank "TM_ENCRYPTION_KEY" "$(random_secret 32)"
 set_if_blank "TM_DB_PASS" "$(random_secret 16)"
 set_if_blank "TESLOG_DB_PASS" "$(random_secret 16)"
-set_if_blank "GRAFANA_PW" "$(random_secret 12)"
 
 echo "Secrets populated in $ENV_FILE."

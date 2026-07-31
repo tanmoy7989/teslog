@@ -21,6 +21,10 @@ data/
 # Downloaded tools (see scripts/get-tesla-tokens.sh)
 bin/
 .venv-tesla-auth/
+.venv-test/
+
+# Test artifacts
+tests/screenshots/
 
 # OS / IDE
 .DS_Store

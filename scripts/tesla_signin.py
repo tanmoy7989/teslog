@@ -12,11 +12,12 @@ sign-in for you. If anything about the auto-submit fails, the tokens are
 printed for you to paste in by hand instead.
 """
 
+import os
 import re
 import subprocess
 import sys
 
-TESLAMATE_URL = "http://localhost:4000/sign_in"
+TESLAMATE_URL = os.environ.get("TESLAMATE_URL", "http://localhost:4000/sign_in")
 
 TOKEN_PATTERN = re.compile(
     r"ACCESS TOKEN -+\s*\n\s*\n(?P<access>\S+)\s*\n.*?"
@@ -61,7 +62,7 @@ def main() -> None:
         print("Signed in to TeslaMate.")
     except Exception as exc:
         print(f"Auto sign-in failed ({exc}).")
-        print("Paste these into http://localhost:4000/sign_in manually:")
+        print(f"Paste these into {TESLAMATE_URL} manually:")
         print(f"  Access Token:  {access}")
         print(f"  Refresh Token: {refresh}")
 

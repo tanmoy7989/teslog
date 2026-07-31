@@ -8,15 +8,15 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from teslog.api.routes import public_router, router
 from teslog.config import get_settings
 from teslog.db import init_teslog_db
+from teslog.routes import public_router, router
 from teslog.services.sync import sync_loop
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("teslog")
 
-STATIC_DIR = pathlib.Path(__file__).resolve().parent / "static"
+STATIC_DIR = pathlib.Path(__file__).resolve().parent / "dashboard" / "static"
 
 
 @asynccontextmanager

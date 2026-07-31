@@ -3,7 +3,7 @@ import logging
 
 from sqlalchemy import select
 
-from teslog.clients.osrm import OSRMClient
+from teslog.clients import OSRMClient
 from teslog.config import get_settings
 from teslog.db import DriveRouteComparison, get_teslog_sessionmaker, get_tm_sessionmaker
 from teslog.services.drives import get_completed_drives

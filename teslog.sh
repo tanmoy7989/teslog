@@ -1,12 +1,19 @@
 #!/bin/bash
-# Install and run Teslog (Mac only, for now).
+# Install and run Teslog (Mac and Linux/Raspberry Pi).
 set -euo pipefail
 
 cd "$(dirname "$0")"
 
 ENV_FILE=".env"
 EXAMPLE_FILE="config/.env.example"
-COMPOSE=(docker compose --env-file .env -f docker/compose.yml -f docker/compose.dev.yml)
+
+# The dev overlay bind-mounts src/ for live-reload — useful on a Mac dev
+# machine, wrong for a Pi running as a production appliance.
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    COMPOSE=(docker compose --env-file .env -f docker/compose.yml -f docker/compose.dev.yml)
+else
+    COMPOSE=(docker compose --env-file .env -f docker/compose.yml)
+fi
 
 usage() {
     cat <<'EOF'
@@ -47,13 +54,25 @@ case "$COMMAND" in
 esac
 
 if ! command -v docker >/dev/null 2>&1; then
-    echo "Docker is required but wasn't found. Install Docker Desktop:"
-    echo "  https://www.docker.com/products/docker-desktop/"
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        echo "Docker is required but wasn't found. Install Docker Desktop:"
+        echo "  https://www.docker.com/products/docker-desktop/"
+    else
+        echo "Docker is required but wasn't found. Install it with:"
+        echo "  curl -sSL https://get.docker.com | sh"
+        echo "then add your user to the docker group and re-login:"
+        echo "  sudo usermod -aG docker \$USER"
+    fi
     exit 1
 fi
 
 if ! docker info >/dev/null 2>&1; then
-    echo "Docker is installed but doesn't seem to be running. Start Docker Desktop and re-run this script."
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        echo "Docker is installed but doesn't seem to be running. Start Docker Desktop and re-run this script."
+    else
+        echo "Docker is installed but doesn't seem to be running (or your user lacks permission)."
+        echo "  sudo systemctl start docker"
+    fi
     exit 1
 fi
 
@@ -82,7 +101,7 @@ fi
 
 echo "This will stop the stack (if running) and permanently delete:"
 echo "  - $ENV_FILE (all generated secrets)"
-echo "  - data/ (TeslaMate's and Teslog's Postgres databases, Grafana dashboards)"
+echo "  - data/ (TeslaMate's and Teslog's Postgres databases)"
 echo
 echo "Any existing Tesla sign-in and recorded drives/charges will be gone."
 read -r -p "Continue? [y/N]: " confirm_wipe || true
