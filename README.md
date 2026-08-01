@@ -32,6 +32,9 @@ the other.
 ./scripts/migrate-to-pi.sh user@pi-host  # copy that onto a Raspberry Pi
 ssh user@pi-host './teslog.sh up'        # start serving, on the Pi
 ./teslog.sh down                         # stop it (on whichever machine is running it)
+
+# optional, on 'up': how often (hours) and where Teslog exports its stats to Google Drive
+ssh user@pi-host './teslog.sh up --export-hours 12 --export-location backups'
 ```
 
 `setup` is a destructive reset — wipes `.env`, all stored data, and the local venvs — then
@@ -65,8 +68,34 @@ untouched. (Re-running the full `setup` → `migrate-to-pi.sh` flow instead woul
 
 ## Backing up to Google Drive
 
-Planned, not yet implemented — will run directly from the Pi. See
-[docs/phase-2-nav-odometer-drift.md](docs/phase-2-nav-odometer-drift.md) for other upcoming work.
+`./teslog.sh up` installs a cron job (removed by `down`, reinstalled by the next `up`) that
+periodically exports Teslog's full stats history — every drive's route comparison and energy
+numbers, every charging session, and a battery-health snapshot — as one CSV, and uploads it via
+[`rclone`](https://rclone.org/) to `gdrive:<location>/teslog_<YY-MM-DD_HH:MM>.csv`. One-time setup,
+on whichever machine runs `up` (e.g. the Pi):
+
+```bash
+curl https://rclone.org/install.sh | sudo bash
+rclone config   # add a remote named exactly "gdrive" pointing at your Google Drive
+```
+
+Frequency (hours) and destination folder default to 24 and `teslog`, set into `.env` by `setup`.
+Override either via `up`'s `--export-hours`/`--export-location` flags — whatever you pass is
+persisted into `.env`, so a later plain `up` (e.g. after a `down`) remembers it rather than
+reverting to the defaults. If the `gdrive` remote isn't configured yet, each export run just logs
+that it's skipping itself (see `drive-export.log` in the repo) instead of failing loudly — `up`
+still starts the server regardless.
+
+The CSV has one row per drive (`type=drive`: drift %, odometer/OSRM/GPS distances, energy used,
+Wh/km), one row per charging session (`type=charge`: kWh added, cost — a separate kind of event
+from a drive, with its own timestamps), and one `type=battery` row per export run with the current
+battery health %. Most columns are blank on rows they don't apply to.
+
+To run it by hand (e.g. to test your rclone setup without waiting for the cron):
+
+```bash
+./scripts/export-to-drive.sh
+```
 
 ## Configuration
 

@@ -81,6 +81,41 @@ async def export_metric_csv(name: str) -> Response:
     )
 
 
+_EXPORT_FIELDNAMES = [
+    "type",
+    "date",
+    "drift_pct",
+    "odometer_km",
+    "osrm_km",
+    "gps_km",
+    "kwh_used",
+    "wh_per_km",
+    "kwh_added",
+    "cost",
+    "battery_health_pct",
+]
+
+
+@router.get("/api/export/full.csv")
+async def export_full_csv() -> Response:
+    """Every dashboard metric's full history, combined into a single CSV (see metrics.export_rows)."""
+    settings = get_settings()
+    client = TeslaMateApiClient()
+    with _session_for("teslog") as teslog_session, _session_for("tm") as tm_session:
+        rows = await metrics.export_rows(teslog_session, tm_session, settings.teslog_car_id, client)
+
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=_EXPORT_FIELDNAMES, restval="")
+    writer.writeheader()
+    writer.writerows(rows)
+
+    return Response(
+        content=buffer.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="teslog_export.csv"'},
+    )
+
+
 @router.get("/api/metrics/{name}")
 async def get_metric_series(name: str) -> list[dict[str, Any]]:
     if name not in _SERIES:

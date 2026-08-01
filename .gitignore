@@ -26,6 +26,9 @@ bin/
 # Test artifacts
 tests/screenshots/
 
+# Drive export cron log (see scripts/export-to-drive.sh)
+drive-export.log
+
 # OS / IDE
 .DS_Store
 .idea/

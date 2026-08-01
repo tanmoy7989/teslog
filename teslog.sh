@@ -16,9 +16,44 @@ VENV_TESLA_AUTH=".venv-tesla-auth"
 VENV_TEST=".venv-test"
 
 COMPOSE=(docker compose --env-file .env -f docker/compose.yml)
+CRON_TAG="# teslog-drive-export"
+EXPORT_HOURS_DEFAULT="24"
+EXPORT_LOCATION_DEFAULT="teslog"
+
+get_env() {
+    local line
+    line=$(grep -E "^$1=" "$ENV_FILE" 2>/dev/null || true)
+    echo "${line#*=}"
+}
+
+set_env() {
+    local key="$1" value="$2"
+    if grep -qE "^${key}=" "$ENV_FILE"; then
+        sed -i.bak -E "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
+    elif grep -qE "^# ${key}=" "$ENV_FILE"; then
+        sed -i.bak -E "s|^# ${key}=.*|${key}=${value}|" "$ENV_FILE"
+    else
+        printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
+    fi
+    rm -f "${ENV_FILE}.bak"
+}
+
+# Installs/replaces the single teslog-drive-export cron line (tagged so it can be found and
+# replaced idempotently without touching any of the user's other cron entries).
+install_export_cron() {
+    local hours="$1" repo_dir
+    repo_dir="$(pwd)"
+    { crontab -l 2>/dev/null | grep -vF "$CRON_TAG"
+      echo "0 */${hours} * * * cd ${repo_dir} && ./scripts/export-to-drive.sh >> drive-export.log 2>&1 ${CRON_TAG}"
+    } | crontab -
+}
+
+remove_export_cron() {
+    crontab -l 2>/dev/null | grep -vF "$CRON_TAG" | crontab - 2>/dev/null || true
+}
 
 usage() {
-    cat <<'EOF'
+    cat <<EOF
 Usage: ./teslog.sh COMMAND
 
 Commands:
@@ -27,15 +62,23 @@ Commands:
           (briefly starting just enough of the stack to do so, then
           stopping it again). Does NOT start the server — see 'up'.
   up      Start the already-configured stack. Run this on whichever machine
-          is actually going to serve Teslog day-to-day.
-  down    Stop the stack.
+          is actually going to serve Teslog day-to-day. Also (re)installs a
+          cron job that exports Teslog's stats to Google Drive via rclone
+          (needs an rclone 'gdrive' remote already configured on this
+          machine — see README.md). Optional flags, persisted into .env so
+          a later plain 'up' remembers them:
+            --export-hours N      how often, in hours (default $EXPORT_HOURS_DEFAULT)
+            --export-location DIR  folder in the gdrive remote (default $EXPORT_LOCATION_DEFAULT)
+  down    Stop the stack and remove the Google Drive export cron job (a
+          later 'up' reinstalls it).
   -h      Show this help.
 
 Examples:
-  ./teslog.sh setup                        # generate config + sign in to TeslaMate
-  ./scripts/migrate-to-pi.sh user@pi-host  # copy that onto a Pi
-  ssh user@pi-host './teslog.sh up'        # start serving, on the Pi
-  ./teslog.sh down                         # stop (on whichever machine is running it)
+  ./teslog.sh setup                                 # generate config + sign in to TeslaMate
+  ./scripts/migrate-to-pi.sh user@pi-host           # copy that onto a Pi
+  ssh user@pi-host './teslog.sh up'                 # start serving, on the Pi
+  ssh user@pi-host './teslog.sh up --export-hours 12 --export-location backups'
+  ./teslog.sh down                                  # stop (on whichever machine is running it)
 EOF
 }
 
@@ -85,6 +128,7 @@ if ! docker compose version >/dev/null 2>&1; then
 fi
 
 if [[ "$COMMAND" == "down" ]]; then
+    remove_export_cron
     exec "${COMPOSE[@]}" down
 fi
 
@@ -93,10 +137,42 @@ if [[ "$COMMAND" == "up" ]]; then
         echo "No $ENV_FILE found — run './teslog.sh setup' first."
         exit 1
     fi
+
+    shift
+    export_hours="" export_location=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --export-hours)
+                export_hours="${2:?--export-hours needs a value}"
+                shift 2
+                ;;
+            --export-location)
+                export_location="${2:?--export-location needs a value}"
+                shift 2
+                ;;
+            *)
+                echo "Unknown option for 'up': $1" >&2
+                exit 1
+                ;;
+        esac
+    done
+    [[ -n "$export_hours" ]] && set_env "TESLOG_EXPORT_FREQUENCY_HOURS" "$export_hours"
+    [[ -n "$export_location" ]] && set_env "TESLOG_EXPORT_LOCATION" "$export_location"
+
+    resolved_hours=$(get_env "TESLOG_EXPORT_FREQUENCY_HOURS")
+    resolved_location=$(get_env "TESLOG_EXPORT_LOCATION")
+    resolved_hours="${resolved_hours:-$EXPORT_HOURS_DEFAULT}"
+    resolved_location="${resolved_location:-$EXPORT_LOCATION_DEFAULT}"
+
     "${COMPOSE[@]}" up -d
+    install_export_cron "$resolved_hours"
+
     echo
     echo "== Teslog is running =="
     echo "  Teslog dashboard: http://localhost:8080"
+    echo "  Google Drive export: every ${resolved_hours}h to gdrive:${resolved_location}/"
+    echo "    (needs the 'gdrive' rclone remote configured — see README.md; if it isn't yet,"
+    echo "     the export just logs and skips itself each run until you run 'rclone config')"
     exit 0
 fi
 
@@ -120,24 +196,6 @@ rm -rf data "$VENV_TESLA_AUTH" "$VENV_TEST"
 echo
 
 cp "$EXAMPLE_FILE" "$ENV_FILE"
-
-get_env() {
-    local line
-    line=$(grep -E "^$1=" "$ENV_FILE" 2>/dev/null || true)
-    echo "${line#*=}"
-}
-
-set_env() {
-    local key="$1" value="$2"
-    if grep -qE "^${key}=" "$ENV_FILE"; then
-        sed -i.bak -E "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
-    elif grep -qE "^# ${key}=" "$ENV_FILE"; then
-        sed -i.bak -E "s|^# ${key}=.*|${key}=${value}|" "$ENV_FILE"
-    else
-        printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
-    fi
-    rm -f "${ENV_FILE}.bak"
-}
 
 prompt_default() {
     local prompt="$1" default="$2" reply
@@ -174,6 +232,11 @@ set_env "TESLOG_CAR_ID" "$car_id"
 
 osrm_url=$(prompt_default "OSRM routing server (public demo server is fine for light personal use)" "https://router.project-osrm.org")
 set_env "OSRM_BASE_URL" "$osrm_url"
+
+# Not asked here — these are only ever adjusted via 'up's --export-hours/--export-location
+# flags (which persist back into .env themselves). Defaulted here just so they're always set.
+set_env "TESLOG_EXPORT_FREQUENCY_HOURS" "$EXPORT_HOURS_DEFAULT"
+set_env "TESLOG_EXPORT_LOCATION" "$EXPORT_LOCATION_DEFAULT"
 echo
 
 echo "-- Test environment --"

@@ -7,6 +7,7 @@ Battery health comes from TeslaMateApi's live Tesla API query — that value
 isn't stored history, so there's nothing to read from Postgres for it.
 """
 
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -61,7 +62,7 @@ def _energy_rows(session: Session, car_id: int, limit: int) -> list[Any]:
     return session.execute(
         text(
             """
-            SELECT d.start_date, d.distance, d.start_rated_range_km, d.end_rated_range_km,
+            SELECT d.id, d.start_date, d.distance, d.start_rated_range_km, d.end_rated_range_km,
                    c.efficiency
             FROM drives d
             JOIN cars c ON c.id = d.car_id
@@ -148,3 +149,92 @@ async def battery_health(client: TeslaMateApiClient) -> dict[str, Any] | None:
     if not pct:
         return None
     return {"battery_health_pct": pct}
+
+
+# --- Full export (all history, combined) --------------------------------------
+
+_EXPORT_LIMIT = 1_000_000  # a full-history export, not a chart window — effectively unbounded
+
+
+def _drive_comparisons_by_id(session: Session, car_id: int) -> dict[int, dict[str, Any]]:
+    rows = session.execute(
+        select(
+            DriveRouteComparison.drive_id,
+            DriveRouteComparison.drive_start_at,
+            DriveRouteComparison.drift_pct,
+            DriveRouteComparison.odometer_delta,
+            DriveRouteComparison.osrm_route_distance,
+            DriveRouteComparison.gps_trace_distance,
+        ).where(DriveRouteComparison.car_id == car_id)
+    ).all()
+    return {
+        row.drive_id: {
+            "date": row.drive_start_at.isoformat(),
+            "drift_pct": round(row.drift_pct, 2) if row.drift_pct is not None else None,
+            "odometer_km": row.odometer_delta,
+            "osrm_km": row.osrm_route_distance,
+            "gps_km": row.gps_trace_distance,
+        }
+        for row in rows
+    }
+
+
+def _drive_energy_by_id(session: Session, car_id: int) -> dict[int, dict[str, Any]]:
+    result: dict[int, dict[str, Any]] = {}
+    for row in _energy_rows(session, car_id, limit=_EXPORT_LIMIT):
+        range_used_km = float(row.start_rated_range_km) - float(row.end_rated_range_km)
+        kwh_used = max(0.0, range_used_km * row.efficiency / 1000)
+        result[row.id] = {
+            "date": row.start_date.isoformat(),
+            "kwh_used": round(kwh_used, 2),
+            "wh_per_km": round((kwh_used * 1000) / row.distance, 1),
+        }
+    return result
+
+
+def drive_export_rows(teslog_session: Session, tm_session: Session, car_id: int) -> list[dict[str, Any]]:
+    """One row per drive — route-comparison and energy metrics merged by drive id.
+
+    The two halves live in different databases (no SQL join possible), but both are keyed off
+    the same underlying TeslaMate drive, so merging by drive id — rather than matching the two
+    sides' date strings — stays exact even when one side is missing a drive the other has.
+    """
+    comparisons = _drive_comparisons_by_id(teslog_session, car_id)
+    energy = _drive_energy_by_id(tm_session, car_id)
+    return [
+        {"type": "drive", **comparisons.get(drive_id, {}), **energy.get(drive_id, {})}
+        for drive_id in comparisons.keys() | energy.keys()
+    ]
+
+
+def charge_export_rows(session: Session, car_id: int) -> list[dict[str, Any]]:
+    """One row per charging session — a separate event from a drive, its own timestamps."""
+    return [
+        {
+            "type": "charge",
+            "date": row.start_date.isoformat(),
+            "kwh_added": float(row.charge_energy_added) if row.charge_energy_added is not None else None,
+            "cost": float(row.cost) if row.cost is not None else None,
+        }
+        for row in _charging_rows(session, car_id, limit=_EXPORT_LIMIT)
+    ]
+
+
+async def export_rows(
+    teslog_session: Session, tm_session: Session, car_id: int, client: TeslaMateApiClient
+) -> list[dict[str, Any]]:
+    """Every dashboard metric's full history, combined into one row-per-drive/row-per-charge log."""
+    rows = drive_export_rows(teslog_session, tm_session, car_id)
+    rows += charge_export_rows(tm_session, car_id)
+
+    health = await battery_health(client)
+    if health:
+        rows.append(
+            {
+                "type": "battery",
+                "date": datetime.now(UTC).isoformat(),
+                "battery_health_pct": health["battery_health_pct"],
+            }
+        )
+
+    return sorted(rows, key=lambda row: row["date"])
