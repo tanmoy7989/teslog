@@ -1,19 +1,21 @@
 #!/bin/bash
-# Install and run Teslog (Mac and Linux/Raspberry Pi).
+# Teslog setup + stack control.
+#
+# 'setup' generates config and signs in to TeslaMate — run it wherever you
+# have a real screen (e.g. a Mac). 'up'/'down' start and stop the actual
+# server — run those on whichever machine is meant to serve Teslog
+# day-to-day (e.g. a Raspberry Pi). See scripts/migrate-to-pi.sh to move a
+# signed-in setup from one machine onto the other.
 set -euo pipefail
 
 cd "$(dirname "$0")"
 
 ENV_FILE=".env"
 EXAMPLE_FILE="config/.env.example"
+VENV_TESLA_AUTH=".venv-tesla-auth"
+VENV_TEST=".venv-test"
 
-# The dev overlay bind-mounts src/ for live-reload — useful on a Mac dev
-# machine, wrong for a Pi running as a production appliance.
-if [[ "$(uname -s)" == "Darwin" ]]; then
-    COMPOSE=(docker compose --env-file .env -f docker/compose.yml -f docker/compose.dev.yml)
-else
-    COMPOSE=(docker compose --env-file .env -f docker/compose.yml)
-fi
+COMPOSE=(docker compose --env-file .env -f docker/compose.yml)
 
 usage() {
     cat <<'EOF'
@@ -21,18 +23,19 @@ Usage: ./teslog.sh COMMAND
 
 Commands:
   setup   Wipe any existing .env/data and install fresh: generate secrets,
-          ask the one-time config questions, start the stack, then run the
-          Tesla sign-in token generator and print the tokens to paste into
-          TeslaMate.
-  up      Start the already-configured stack (day-to-day — after a reboot
-          or './teslog.sh down', use this, not 'setup').
+          ask the one-time config questions, and sign in to TeslaMate
+          (briefly starting just enough of the stack to do so, then
+          stopping it again). Does NOT start the server — see 'up'.
+  up      Start the already-configured stack. Run this on whichever machine
+          is actually going to serve Teslog day-to-day.
   down    Stop the stack.
   -h      Show this help.
 
 Examples:
-  ./teslog.sh setup   # first time, or to reset and start completely over
-  ./teslog.sh up       # every day after that
-  ./teslog.sh down
+  ./teslog.sh setup                        # generate config + sign in to TeslaMate
+  ./scripts/migrate-to-pi.sh user@pi-host  # copy that onto a Pi
+  ssh user@pi-host './teslog.sh up'        # start serving, on the Pi
+  ./teslog.sh down                         # stop (on whichever machine is running it)
 EOF
 }
 
@@ -102,6 +105,7 @@ fi
 echo "This will stop the stack (if running) and permanently delete:"
 echo "  - $ENV_FILE (all generated secrets)"
 echo "  - data/ (TeslaMate's and Teslog's Postgres databases)"
+echo "  - $VENV_TESLA_AUTH/ and $VENV_TEST/ (rebuilt fresh below)"
 echo
 echo "Any existing Tesla sign-in and recorded drives/charges will be gone."
 read -r -p "Continue? [y/N]: " confirm_wipe || true
@@ -112,7 +116,7 @@ fi
 
 "${COMPOSE[@]}" down 2>/dev/null || true
 rm -f "$ENV_FILE"
-rm -rf data
+rm -rf data "$VENV_TESLA_AUTH" "$VENV_TEST"
 echo
 
 cp "$EXAMPLE_FILE" "$ENV_FILE"
@@ -141,6 +145,18 @@ prompt_default() {
     echo "${reply:-$default}"
 }
 
+find_python312() {
+    local candidate
+    for candidate in python3.13 python3.12 python3; do
+        if command -v "$candidate" >/dev/null 2>&1 \
+            && "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)' 2>/dev/null; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
 echo "== Teslog setup =="
 echo
 echo "-- Secrets --"
@@ -160,14 +176,38 @@ osrm_url=$(prompt_default "OSRM routing server (public demo server is fine for l
 set_env "OSRM_BASE_URL" "$osrm_url"
 echo
 
-echo "-- Starting stack --"
-"${COMPOSE[@]}" up -d
+echo "-- Test environment --"
+if python_bin=$(find_python312); then
+    if "$python_bin" -m venv "$VENV_TEST" \
+        && "$VENV_TEST/bin/pip" install --quiet --upgrade pip \
+        && "$VENV_TEST/bin/pip" install --quiet -e ".[test]" \
+        && "$VENV_TEST/bin/playwright" install chromium; then
+        echo "Test environment ready: $VENV_TEST"
+    else
+        echo "Test environment setup failed — continuing without it (not required to run Teslog)."
+        rm -rf "$VENV_TEST"
+    fi
+else
+    echo "No Python 3.12+ found on this machine — skipping the test environment ($VENV_TEST)."
+    echo "Not required to run Teslog; only needed for tests/test_dashboard_integration.py."
+fi
+echo
+
+echo "-- Starting TeslaMate (for sign-in) --"
+"${COMPOSE[@]}" up -d database teslamate
 echo
 
 echo "-- Tesla sign-in --"
 ./scripts/get-tesla-tokens.sh
 
 echo
-echo "== Teslog is running =="
-echo "  TeslaMate:        http://localhost:4000 (auto-signed in above, unless that failed — see output)"
-echo "  Teslog dashboard: http://localhost:8080"
+echo "-- Stopping local stack --"
+"${COMPOSE[@]}" down
+echo
+
+echo "== Setup complete =="
+echo "TeslaMate is signed in. Nothing is running locally — starting the server is a separate step:"
+echo
+echo "  ./teslog.sh up                            # to run right here, or:"
+echo "  ./scripts/migrate-to-pi.sh user@pi-host   # to move this onto a Raspberry Pi"
+echo "  ssh user@pi-host './teslog.sh up'         # then start it there"
