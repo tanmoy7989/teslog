@@ -19,6 +19,7 @@ COMPOSE=(docker compose --env-file .env -f docker/compose.yml)
 CRON_TAG="# teslog-drive-export"
 EXPORT_HOURS_DEFAULT="24"
 EXPORT_LOCATION_DEFAULT="teslog"
+PI_ROOT_DEFAULT="teslog"
 
 get_env() {
     local line
@@ -74,11 +75,11 @@ Commands:
   -h      Show this help.
 
 Examples:
-  ./teslog.sh setup                                 # generate config + sign in to TeslaMate
-  ./scripts/migrate-to-pi.sh user@pi-host           # copy that onto a Pi
-  ssh user@pi-host './teslog.sh up'                 # start serving, on the Pi
-  ssh user@pi-host './teslog.sh up --export-hours 12 --export-location backups'
-  ./teslog.sh down                                  # stop (on whichever machine is running it)
+  ./teslog.sh setup                                            # generate config + sign in to TeslaMate
+  ./scripts/migrate-to-pi.sh user@pi-host                      # copy that onto a Pi (~/$PI_ROOT_DEFAULT there)
+  ssh user@pi-host 'cd ~/$PI_ROOT_DEFAULT && ./teslog.sh up'    # start serving, on the Pi
+  ssh user@pi-host 'cd ~/$PI_ROOT_DEFAULT && ./teslog.sh up --export-hours 12 --export-location backups'
+  ./teslog.sh down                                             # stop (on whichever machine is running it)
 EOF
 }
 
@@ -237,6 +238,9 @@ set_env "OSRM_BASE_URL" "$osrm_url"
 # flags (which persist back into .env themselves). Defaulted here just so they're always set.
 set_env "TESLOG_EXPORT_FREQUENCY_HOURS" "$EXPORT_HOURS_DEFAULT"
 set_env "TESLOG_EXPORT_LOCATION" "$EXPORT_LOCATION_DEFAULT"
+
+# Also not asked — scripts/migrate-to-pi.sh's destination on the Pi (~/$PI_ROOT_DEFAULT there).
+set_env "PI_ROOT" "$PI_ROOT_DEFAULT"
 echo
 
 echo "-- Test environment --"
@@ -268,9 +272,12 @@ echo "-- Stopping local stack --"
 "${COMPOSE[@]}" down
 echo
 
+pi_root=$(get_env "PI_ROOT")
+pi_root="${pi_root:-$PI_ROOT_DEFAULT}"
+
 echo "== Setup complete =="
 echo "TeslaMate is signed in. Nothing is running locally — starting the server is a separate step:"
 echo
-echo "  ./teslog.sh up                            # to run right here, or:"
-echo "  ./scripts/migrate-to-pi.sh user@pi-host   # to move this onto a Raspberry Pi"
-echo "  ssh user@pi-host './teslog.sh up'         # then start it there"
+echo "  ./teslog.sh up                                     # to run right here, or:"
+echo "  ./scripts/migrate-to-pi.sh user@pi-host            # to move this onto a Raspberry Pi (~/$pi_root there)"
+echo "  ssh user@pi-host 'cd ~/$pi_root && ./teslog.sh up'  # then start it there"

@@ -28,14 +28,19 @@ headless Raspberry Pi). `setup` itself never leaves the server running — see
 the other.
 
 ```bash
-./teslog.sh setup                        # on a machine with a screen: config + Tesla sign-in
-./scripts/migrate-to-pi.sh user@pi-host  # copy that onto a Raspberry Pi
-ssh user@pi-host './teslog.sh up'        # start serving, on the Pi
-./teslog.sh down                         # stop it (on whichever machine is running it)
+./teslog.sh setup                                    # on a machine with a screen: config + Tesla sign-in
+./scripts/migrate-to-pi.sh user@pi-host              # copy that onto the Pi, into ~/teslog there
+ssh user@pi-host 'cd ~/teslog && ./teslog.sh up'     # start serving, on the Pi
+./teslog.sh down                                     # stop it (on whichever machine is running it)
 
 # optional, on 'up': how often (hours) and where Teslog exports its stats to Google Drive
-ssh user@pi-host './teslog.sh up --export-hours 12 --export-location backups'
+ssh user@pi-host 'cd ~/teslog && ./teslog.sh up --export-hours 12 --export-location backups'
 ```
+
+`~/teslog` is the default destination `migrate-to-pi.sh` copies into on the Pi — configurable via
+`PI_ROOT` in `.env` (set by `setup`, not normally hand-edited) if you want it somewhere else. Note
+this is where `.env`/`data/` land, not the code itself — clone the repo there separately on the Pi
+first (`git clone ... ~/teslog`) the same way you would on any machine.
 
 `setup` is a destructive reset — wipes `.env`, all stored data, and the local venvs — then
 generates secrets, asks a few config questions, briefly starts just enough of the stack
