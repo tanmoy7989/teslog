@@ -42,6 +42,16 @@ ssh user@pi-host 'cd ~/teslog && ./teslog.sh up --export-hours 12 --export-locat
 this is where `.env`/`data/` land, not the code itself — clone the repo there separately on the Pi
 first (`git clone ... ~/teslog`) the same way you would on any machine.
 
+To deploy a code change (developed and pushed from elsewhere, e.g. a Mac) onto the Pi:
+
+```bash
+ssh user@pi-host 'cd ~/teslog && ./teslog.sh update'
+```
+
+`git pull`s, rebuilds just the `teslog` image, and recreates just that container —
+`teslamate`/`teslamateapi`/`database` (and the Drive-export cron) keep running throughout, so this
+doesn't need `down` first. Refuses to pull if the Pi's checkout has uncommitted changes.
+
 `setup` is a destructive reset — wipes `.env`, all stored data, and the local venvs — then
 generates secrets, asks a few config questions, briefly starts just enough of the stack
 (`database` + `teslamate`) to sign in to TeslaMate, and stops everything again. `up` is what
@@ -120,6 +130,14 @@ On a fixed interval (and via the dashboard's "Sync now" button), Teslog reads co
 their GPS trace directly from TeslaMate's Postgres database, calls OSRM for the routed distance
 between start and end, and stores the comparison — including drift % — in its own
 `drive_route_comparisons` table.
+
+TeslaMate still logs every drive it always has — Teslog doesn't touch that. But short back-and-forth
+movements (backing into a tight garage, a driving lesson, three-point turns) aren't real "drives"
+for these stats, so any drive where the smaller of its OSRM route distance / odometer delta is
+under 0.5 miles is excluded from every chart and the Drive export — not just distance/drift, but
+energy and efficiency too, since those would otherwise be skewed by a near-zero-distance blip. A
+drive Teslog couldn't fully measure (OSRM failed, no GPS) is never excluded on that basis alone —
+only drives positively confirmed to be short are dropped.
 
 ## Testing
 

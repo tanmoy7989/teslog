@@ -72,6 +72,11 @@ Commands:
             --export-location DIR  folder in the gdrive remote (default $EXPORT_LOCATION_DEFAULT)
   down    Stop the stack and remove the Google Drive export cron job (a
           later 'up' reinstalls it).
+  update  Deploy a code change: git pull, rebuild the teslog image, and
+          recreate just that container. teslamate/teslamateapi/database
+          (and the Drive-export cron) are untouched and keep running
+          throughout — no need for 'down' first. Refuses to pull over
+          uncommitted local changes.
   -h      Show this help.
 
 Examples:
@@ -79,6 +84,7 @@ Examples:
   ./scripts/migrate-to-pi.sh user@pi-host                      # copy that onto a Pi (~/$PI_ROOT_DEFAULT there)
   ssh user@pi-host 'cd ~/$PI_ROOT_DEFAULT && ./teslog.sh up'    # start serving, on the Pi
   ssh user@pi-host 'cd ~/$PI_ROOT_DEFAULT && ./teslog.sh up --export-hours 12 --export-location backups'
+  ssh user@pi-host 'cd ~/$PI_ROOT_DEFAULT && ./teslog.sh update'  # deploy a code change, on the Pi
   ./teslog.sh down                                             # stop (on whichever machine is running it)
 EOF
 }
@@ -90,7 +96,7 @@ case "$COMMAND" in
         usage
         exit 0
         ;;
-    setup|up|down)
+    setup|up|down|update)
         ;;
     *)
         echo "Unknown command: $COMMAND" >&2
@@ -174,6 +180,33 @@ if [[ "$COMMAND" == "up" ]]; then
     echo "  Google Drive export: every ${resolved_hours}h to gdrive:${resolved_location}/"
     echo "    (needs the 'gdrive' rclone remote configured — see README.md; if it isn't yet,"
     echo "     the export just logs and skips itself each run until you run 'rclone config')"
+    exit 0
+fi
+
+if [[ "$COMMAND" == "update" ]]; then
+    if [[ ! -f "$ENV_FILE" ]]; then
+        echo "No $ENV_FILE found — run './teslog.sh setup' first."
+        exit 1
+    fi
+    if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
+        echo "Working tree has uncommitted changes — resolve those (see 'git status'), then re-run." >&2
+        exit 1
+    fi
+
+    echo "-- Pulling latest --"
+    git pull
+    echo
+
+    # --build only rebuilds services with a 'build:' key (just teslog); 'up -d' only recreates
+    # containers whose image/config actually changed — teslamate/teslamateapi/database (and the
+    # Drive-export cron) are left running throughout, so this needs no 'down' first. There's a
+    # brief blip on the Teslog dashboard itself while its one container restarts.
+    echo "-- Rebuilding + redeploying --"
+    "${COMPOSE[@]}" up -d --build
+
+    echo
+    echo "== Updated =="
+    echo "  Teslog dashboard: http://localhost:8080"
     exit 0
 fi
 

@@ -11,20 +11,55 @@ from datetime import UTC, datetime
 from typing import Any
 
 import httpx
-from sqlalchemy import select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
 
 from teslog.clients import TeslaMateApiClient
-from teslog.db import DriveRouteComparison
+from teslog.db import DriveRouteComparison, get_teslog_sessionmaker
 
 # --- Distance (Teslog DB) ----------------------------------------------------
+
+# Front-and-back garage shuffles, three-point turns, driving lessons: real movement, but not a
+# "drive" worth tracking. Excluded wherever the smaller of OSRM route distance / odometer delta
+# is below this, so a short GPS blip doesn't get counted just because the odometer briefly moved.
+_MIN_DRIVE_KM = 0.5 * 1.609344  # 0.5 miles
+
+
+def _not_short_trip():
+    """SQLAlchemy predicate: false only when both distances are known AND their min is small.
+
+    Missing data (OSRM failed, no GPS) never counts as "short" on its own — this only excludes
+    drives positively confirmed to be tiny, not ones we simply couldn't measure.
+    """
+    return or_(
+        DriveRouteComparison.odometer_delta.is_(None),
+        DriveRouteComparison.osrm_route_distance.is_(None),
+        func.least(DriveRouteComparison.odometer_delta, DriveRouteComparison.osrm_route_distance) > _MIN_DRIVE_KM,
+    )
+
+
+def _excluded_short_trip_ids(car_id: int) -> set[int]:
+    """Drive ids `_not_short_trip` would filter out — for cross-referencing against TeslaMate's
+    own `drives` table, which has no OSRM distance of its own to filter by directly."""
+    with get_teslog_sessionmaker()() as session:
+        return set(
+            session.execute(
+                select(DriveRouteComparison.drive_id).where(
+                    DriveRouteComparison.car_id == car_id, ~_not_short_trip()
+                )
+            ).scalars()
+        )
 
 
 def drift_pct_series(session: Session, car_id: int, limit: int = 200) -> list[dict[str, Any]]:
     """Odometer drift %: (odometer_delta - osrm_route_distance) / osrm_route_distance * 100."""
     rows = session.execute(
         select(DriveRouteComparison.drive_start_at, DriveRouteComparison.drift_pct)
-        .where(DriveRouteComparison.car_id == car_id, DriveRouteComparison.drift_pct.is_not(None))
+        .where(
+            DriveRouteComparison.car_id == car_id,
+            DriveRouteComparison.drift_pct.is_not(None),
+            _not_short_trip(),
+        )
         .order_by(DriveRouteComparison.drive_start_at)
         .limit(limit)
     ).all()
@@ -40,7 +75,7 @@ def distance_comparison_series(session: Session, car_id: int, limit: int = 200) 
             DriveRouteComparison.osrm_route_distance,
             DriveRouteComparison.gps_trace_distance,
         )
-        .where(DriveRouteComparison.car_id == car_id)
+        .where(DriveRouteComparison.car_id == car_id, _not_short_trip())
         .order_by(DriveRouteComparison.drive_start_at)
         .limit(limit)
     ).all()
@@ -79,8 +114,11 @@ def _energy_rows(session: Session, car_id: int, limit: int) -> list[Any]:
 
 def energy_used_series(session: Session, car_id: int, limit: int = 200) -> list[dict[str, Any]]:
     """kWh used per drive, from rated-range consumed x the car's rated efficiency (Wh/km)."""
+    excluded = _excluded_short_trip_ids(car_id)
     result = []
     for row in reversed(_energy_rows(session, car_id, limit)):
+        if row.id in excluded:
+            continue
         range_used_km = float(row.start_rated_range_km) - float(row.end_rated_range_km)
         kwh_used = max(0.0, range_used_km * row.efficiency / 1000)
         result.append({"date": row.start_date.isoformat(), "kwh_used": round(kwh_used, 2)})
@@ -89,8 +127,11 @@ def energy_used_series(session: Session, car_id: int, limit: int = 200) -> list[
 
 def energy_efficiency_series(session: Session, car_id: int, limit: int = 200) -> list[dict[str, Any]]:
     """Actual Wh/km for each drive (vs. the car's nominal rated efficiency)."""
+    excluded = _excluded_short_trip_ids(car_id)
     result = []
     for row in reversed(_energy_rows(session, car_id, limit)):
+        if row.id in excluded:
+            continue
         range_used_km = float(row.start_rated_range_km) - float(row.end_rated_range_km)
         kwh_used = max(0.0, range_used_km * row.efficiency / 1000)
         wh_per_km = (kwh_used * 1000) / row.distance
@@ -165,7 +206,7 @@ def _drive_comparisons_by_id(session: Session, car_id: int) -> dict[int, dict[st
             DriveRouteComparison.odometer_delta,
             DriveRouteComparison.osrm_route_distance,
             DriveRouteComparison.gps_trace_distance,
-        ).where(DriveRouteComparison.car_id == car_id)
+        ).where(DriveRouteComparison.car_id == car_id, _not_short_trip())
     ).all()
     return {
         row.drive_id: {
@@ -180,8 +221,11 @@ def _drive_comparisons_by_id(session: Session, car_id: int) -> dict[int, dict[st
 
 
 def _drive_energy_by_id(session: Session, car_id: int) -> dict[int, dict[str, Any]]:
+    excluded = _excluded_short_trip_ids(car_id)
     result: dict[int, dict[str, Any]] = {}
     for row in _energy_rows(session, car_id, limit=_EXPORT_LIMIT):
+        if row.id in excluded:
+            continue
         range_used_km = float(row.start_rated_range_km) - float(row.end_rated_range_km)
         kwh_used = max(0.0, range_used_km * row.efficiency / 1000)
         result[row.id] = {
