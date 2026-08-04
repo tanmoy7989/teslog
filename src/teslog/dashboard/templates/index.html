@@ -8,7 +8,7 @@
 {% block content %}
 <section class="kpi-row">
   <div class="stat-tile" id="kpi-drift">
-    <div class="label">Odometer drift</div>
+    <div class="label">Odometer drift (OSRM)</div>
     <div class="value-row">
       <span class="value">—</span>
       <span class="delta"></span>
@@ -52,10 +52,11 @@
     <div class="chart-head">
       <div>
         <h2>Odometer drift %</h2>
-        <div class="chart-desc">(odometer &minus; OSRM route) / OSRM route, per drive</div>
+        <div class="chart-desc">OSRMDrift: vs. OSRM's routed distance. HaversineDrift: vs. the GPS trace.</div>
       </div>
       <a class="csv-link" href="/api/metrics/drift.csv" download>Download CSV</a>
     </div>
+    <div id="legend-drift" class="chart-legend"></div>
     <div class="chart-canvas-wrap"><canvas id="chart-drift"></canvas></div>
   </div>
 
