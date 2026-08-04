@@ -19,6 +19,7 @@ import contextlib
 import importlib
 import os
 import pathlib
+import statistics
 import threading
 import time
 
@@ -195,11 +196,20 @@ def test_dashboard_shows_seeded_data(live_app):
         assert page.locator(".empty-state", has_text="No energy data yet").count() == 0
         assert page.locator(".empty-state", has_text="No charging sessions yet").count() == 0
 
-        # The drift KPI tile reflects the latest (most recent) seeded drive.
-        # The tile intentionally displays 1 decimal place (dashboard.js
-        # toFixed(1)), coarser than the underlying 2-decimal API value.
-        drift_value = page.locator("#kpi-drift .value").inner_text()
-        assert drift_value == f"{EXPECTED_OSRM_DRIFT_PCT[-1]:.1f}%"
+        # The drift KPI tile shows both OSRM and Haversine drift as mean +/- sample stdev
+        # across every seeded drive, not the latest drive's value. Hand-computed from
+        # EXPECTED_OSRM_DRIFT_PCT / EXPECTED_HAVERSINE_DRIFT_PCT with Python's statistics
+        # module (sample stdev, ddof=1 — same as dashboard.js's implementation). Tile
+        # intentionally displays 1 decimal place (dashboard.js toFixed(1)).
+        osrm_drift_value = page.locator("#kpi-drift .drift-value-osrm").inner_text()
+        assert osrm_drift_value == f"{statistics.mean(EXPECTED_OSRM_DRIFT_PCT):.1f}%"
+        osrm_drift_delta = page.locator("#kpi-drift .drift-delta-osrm").inner_text()
+        assert osrm_drift_delta == f"±{statistics.stdev(EXPECTED_OSRM_DRIFT_PCT):.1f}pp"
+
+        haversine_drift_value = page.locator("#kpi-drift .drift-value-haversine").inner_text()
+        assert haversine_drift_value == f"{statistics.mean(EXPECTED_HAVERSINE_DRIFT_PCT):.1f}%"
+        haversine_drift_delta = page.locator("#kpi-drift .drift-delta-haversine").inner_text()
+        assert haversine_drift_delta == f"±{statistics.stdev(EXPECTED_HAVERSINE_DRIFT_PCT):.1f}pp"
 
         # Battery health has no live TeslaMateApi behind it — should show the
         # "unavailable" placeholder, not a crash or a stale chart.
