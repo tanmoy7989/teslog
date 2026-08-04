@@ -44,10 +44,12 @@ BASE_URL = f"http://{TEST_HOST}:{TEST_PORT}"
 CAR_ID = 1
 
 # Expected values, hand-derived independently from the fixture data in
-# tests/data/ (not by re-running the app's own formulas) — see the drift_pct
-# / kwh_used / wh_per_km comments in tests/data/teslog_seed.sql and
-# teslamate_seed.sql for the inputs these come from.
-EXPECTED_DRIFT_PCT = [4.35, 3.85, 4.32, 3.77, 4.48]
+# tests/data/ (not by re-running the app's own formulas) — see the
+# odometer/osrm/gps distance columns in tests/data/teslog_seed.sql and the
+# kwh_used / wh_per_km comments in teslamate_seed.sql for the inputs these
+# come from.
+EXPECTED_OSRM_DRIFT_PCT = [4.35, 3.85, 4.32, 3.77, 4.48]
+EXPECTED_HAVERSINE_DRIFT_PCT = [-2.44, -2.17, -1.36, -1.79, -2.1]
 EXPECTED_KWH_USED = [2.43, 2.74, 2.89, 2.28, 2.89]
 EXPECTED_WH_PER_KM = [202.7, 202.7, 199.2, 207.3, 206.3]
 EXPECTED_CHARGE_ENERGY = [25.40, 30.10, 18.75]
@@ -150,7 +152,8 @@ def test_dashboard_shows_seeded_data(live_app):
     # --- The underlying data pipeline: real SQL against the fake Postgres data ---
     with httpx.Client(base_url=base_url) as client:
         drift = client.get("/api/metrics/drift").json()
-        assert [row["drift_pct"] for row in drift] == EXPECTED_DRIFT_PCT
+        assert [row["osrm_drift_pct"] for row in drift] == EXPECTED_OSRM_DRIFT_PCT
+        assert [row["haversine_drift_pct"] for row in drift] == EXPECTED_HAVERSINE_DRIFT_PCT
 
         distance = client.get("/api/metrics/distance").json()
         assert len(distance) == 5
@@ -196,7 +199,7 @@ def test_dashboard_shows_seeded_data(live_app):
         # The tile intentionally displays 1 decimal place (dashboard.js
         # toFixed(1)), coarser than the underlying 2-decimal API value.
         drift_value = page.locator("#kpi-drift .value").inner_text()
-        assert drift_value == f"{EXPECTED_DRIFT_PCT[-1]:.1f}%"
+        assert drift_value == f"{EXPECTED_OSRM_DRIFT_PCT[-1]:.1f}%"
 
         # Battery health has no live TeslaMateApi behind it — should show the
         # "unavailable" placeholder, not a crash or a stale chart.

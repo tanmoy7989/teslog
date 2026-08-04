@@ -39,7 +39,7 @@ async def trigger_sync() -> dict[str, int]:
 
 # metric name -> (function, which DB it reads, CSV column order)
 _SERIES: dict[str, tuple[Callable[..., list[dict[str, Any]]], str, list[str]]] = {
-    "drift": (metrics.drift_pct_series, "teslog", ["date", "drift_pct"]),
+    "drift": (metrics.drift_pct_series, "teslog", ["date", "osrm_drift_pct", "haversine_drift_pct"]),
     "distance": (metrics.distance_comparison_series, "teslog", ["date", "odometer_km", "osrm_km", "gps_km"]),
     "energy-used": (metrics.energy_used_series, "tm", ["date", "kwh_used"]),
     "energy-efficiency": (metrics.energy_efficiency_series, "tm", ["date", "wh_per_km"]),
@@ -84,7 +84,8 @@ async def export_metric_csv(name: str) -> Response:
 _EXPORT_FIELDNAMES = [
     "type",
     "date",
-    "drift_pct",
+    "osrm_drift_pct",
+    "haversine_drift_pct",
     "odometer_km",
     "osrm_km",
     "gps_km",

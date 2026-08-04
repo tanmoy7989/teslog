@@ -2,7 +2,8 @@
 
 Stats dashboard for [TeslaMate](https://github.com/teslamate-org/teslamate): for each completed
 drive, compares an OSRM-routed driving distance and the GPS trace distance against the car's
-actual odometer delta, and surfaces the drift between them.
+actual odometer delta, and surfaces the drift between them as two separate metrics — **OSRMDrift**
+and **HaversineDrift** (see [How it works](#how-it-works)).
 
 Runs on macOS and Linux, including a Raspberry Pi. No MQTT, no Grafana — Teslog is its own
 dashboard and doesn't need live status. Real-time nav-drift tracking (MQTT-based) is planned next —
@@ -101,10 +102,10 @@ reverting to the defaults. If the `gdrive` remote isn't configured yet, each exp
 that it's skipping itself (see `drive-export.log` in the repo) instead of failing loudly — `up`
 still starts the server regardless.
 
-The CSV has one row per drive (`type=drive`: drift %, odometer/OSRM/GPS distances, energy used,
-Wh/km), one row per charging session (`type=charge`: kWh added, cost — a separate kind of event
-from a drive, with its own timestamps), and one `type=battery` row per export run with the current
-battery health %. Most columns are blank on rows they don't apply to.
+The CSV has one row per drive (`type=drive`: OSRMDrift %, HaversineDrift %, odometer/OSRM/GPS
+distances, energy used, Wh/km), one row per charging session (`type=charge`: kWh added, cost — a
+separate kind of event from a drive, with its own timestamps), and one `type=battery` row per
+export run with the current battery health %. Most columns are blank on rows they don't apply to.
 
 To run it by hand (e.g. to test your rclone setup without waiting for the cron):
 
@@ -128,8 +129,20 @@ No login on the dashboard itself — it's built for LAN-only use.
 
 On a fixed interval (and via the dashboard's "Sync now" button), Teslog reads completed drives and
 their GPS trace directly from TeslaMate's Postgres database, calls OSRM for the routed distance
-between start and end, and stores the comparison — including drift % — in its own
-`drive_route_comparisons` table.
+between start and end, and stores the comparison in its own `drive_route_comparisons` table.
+
+Two drift metrics are reported, plotted together on the same chart, because they measure different
+things:
+
+- **OSRMDrift** — `(odometer_delta - osrm_route_distance) / osrm_route_distance * 100`. OSRM is
+  given only the drive's start/end points and asked for the shortest route between them per
+  OpenStreetMap's road network — it has no idea what path you actually took. So this tracks how
+  much your actual route diverged from the "optimal" one, not GPS/odometer error.
+- **HaversineDrift** — `(odometer_delta - gps_trace_distance) / gps_trace_distance * 100`, where
+  `gps_trace_distance` is the sum of the haversine (straight-line) distance between every
+  consecutive GPS point TeslaMate recorded along the drive. Since this traces the path you actually
+  drove (same as the odometer), it should stay close to zero — a persistent nonzero HaversineDrift
+  would point at real odometer or GPS inaccuracy, rather than just route choice.
 
 TeslaMate still logs every drive it always has — Teslog doesn't touch that. But short back-and-forth
 movements (backing into a tight garage, a driving lesson, three-point turns) aren't real "drives"

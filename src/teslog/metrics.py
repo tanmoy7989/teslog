@@ -51,19 +51,47 @@ def _excluded_short_trip_ids(car_id: int) -> set[int]:
         )
 
 
+def _drift_pct(odometer_delta: float | None, baseline_distance: float | None) -> float | None:
+    """(odometer_delta - baseline_distance) / baseline_distance * 100, or None if either is missing."""
+    if odometer_delta is None or not baseline_distance:
+        return None
+    return round((odometer_delta - baseline_distance) / baseline_distance * 100, 2)
+
+
 def drift_pct_series(session: Session, car_id: int, limit: int = 200) -> list[dict[str, Any]]:
-    """Odometer drift %: (odometer_delta - osrm_route_distance) / osrm_route_distance * 100."""
+    """Odometer drift % against two different baselines, per drive:
+
+    OSRMDrift — vs. OSRM's routed distance between the drive's start/end points (what the road
+    network says the trip *should* have taken — diverges if you didn't take the shortest route).
+    HaversineDrift — vs. the GPS trace distance (straight-line hops between every recorded point
+    along the path actually driven) — should track the odometer closely, since both describe the
+    same real path.
+    """
     rows = session.execute(
-        select(DriveRouteComparison.drive_start_at, DriveRouteComparison.drift_pct)
-        .where(
-            DriveRouteComparison.car_id == car_id,
-            DriveRouteComparison.drift_pct.is_not(None),
-            _not_short_trip(),
+        select(
+            DriveRouteComparison.drive_start_at,
+            DriveRouteComparison.odometer_delta,
+            DriveRouteComparison.osrm_route_distance,
+            DriveRouteComparison.gps_trace_distance,
         )
+        .where(DriveRouteComparison.car_id == car_id, _not_short_trip())
         .order_by(DriveRouteComparison.drive_start_at)
         .limit(limit)
     ).all()
-    return [{"date": row.drive_start_at.isoformat(), "drift_pct": round(row.drift_pct, 2)} for row in rows]
+    result = []
+    for row in rows:
+        osrm_drift = _drift_pct(row.odometer_delta, row.osrm_route_distance)
+        haversine_drift = _drift_pct(row.odometer_delta, row.gps_trace_distance)
+        if osrm_drift is None and haversine_drift is None:
+            continue
+        result.append(
+            {
+                "date": row.drive_start_at.isoformat(),
+                "osrm_drift_pct": osrm_drift,
+                "haversine_drift_pct": haversine_drift,
+            }
+        )
+    return result
 
 
 def distance_comparison_series(session: Session, car_id: int, limit: int = 200) -> list[dict[str, Any]]:
@@ -202,7 +230,6 @@ def _drive_comparisons_by_id(session: Session, car_id: int) -> dict[int, dict[st
         select(
             DriveRouteComparison.drive_id,
             DriveRouteComparison.drive_start_at,
-            DriveRouteComparison.drift_pct,
             DriveRouteComparison.odometer_delta,
             DriveRouteComparison.osrm_route_distance,
             DriveRouteComparison.gps_trace_distance,
@@ -211,7 +238,8 @@ def _drive_comparisons_by_id(session: Session, car_id: int) -> dict[int, dict[st
     return {
         row.drive_id: {
             "date": row.drive_start_at.isoformat(),
-            "drift_pct": round(row.drift_pct, 2) if row.drift_pct is not None else None,
+            "osrm_drift_pct": _drift_pct(row.odometer_delta, row.osrm_route_distance),
+            "haversine_drift_pct": _drift_pct(row.odometer_delta, row.gps_trace_distance),
             "odometer_km": row.odometer_delta,
             "osrm_km": row.osrm_route_distance,
             "gps_km": row.gps_trace_distance,

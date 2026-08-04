@@ -138,6 +138,36 @@
     });
   }
 
+  async function renderDriftChart() {
+    const rows = await fetchJSON("/api/metrics/drift");
+    if (!rows || rows.length === 0) {
+      showEmpty("chart-drift", "No drift data yet", "Shows up once a completed drive has both odometer and OSRM/GPS distance.");
+      return;
+    }
+    renderLegend("legend-drift", [
+      { label: "OSRMDrift", color: palette.series1 },
+      { label: "HaversineDrift", color: palette.series2 },
+    ]);
+    const ctx = document.getElementById("chart-drift");
+    new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: rows.map((r) => formatLabel(r.date)),
+        datasets: [
+          { label: "OSRMDrift", data: rows.map((r) => r.osrm_drift_pct), borderColor: palette.series1, backgroundColor: palette.series1, borderWidth: 2, pointRadius: 2, pointHoverRadius: 5, tension: 0.25, spanGaps: true },
+          { label: "HaversineDrift", data: rows.map((r) => r.haversine_drift_pct), borderColor: palette.series2, backgroundColor: palette.series2, borderWidth: 2, pointRadius: 2, pointHoverRadius: 5, tension: 0.25, spanGaps: true },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        scales: baseScales({ title: { display: true, text: "%", color: palette.textMuted, font: { size: 11 } } }),
+        plugins: { legend: { display: false }, tooltip: tooltipConfig() },
+      },
+    });
+  }
+
   async function renderSingleLineChart(canvasId, url, field, opts) {
     const rows = await fetchJSON(url);
     const values = (rows || []).filter((r) => r[field] !== null && r[field] !== undefined);
@@ -239,22 +269,23 @@
   async function renderDriftKpi() {
     const rows = await fetchJSON("/api/metrics/drift");
     const tile = document.getElementById("kpi-drift");
-    if (!rows || rows.length === 0) {
+    const withOsrm = (rows || []).filter((r) => r.osrm_drift_pct !== null && r.osrm_drift_pct !== undefined);
+    if (withOsrm.length === 0) {
       tile.querySelector(".value").textContent = "—";
       tile.querySelector(".delta").textContent = "";
       return;
     }
-    const latest = rows[rows.length - 1].drift_pct;
+    const latest = withOsrm[withOsrm.length - 1].osrm_drift_pct;
     tile.querySelector(".value").textContent = `${latest.toFixed(1)}%`;
-    if (rows.length >= 2) {
-      const prev = rows[rows.length - 2].drift_pct;
+    if (withOsrm.length >= 2) {
+      const prev = withOsrm[withOsrm.length - 2].osrm_drift_pct;
       const delta = latest - prev;
       const improving = Math.abs(latest) < Math.abs(prev);
       const deltaEl = tile.querySelector(".delta");
       deltaEl.textContent = `${delta >= 0 ? "+" : ""}${delta.toFixed(1)}pp vs prev`;
       deltaEl.classList.add(improving ? "good" : "bad");
     }
-    renderSparkline("kpi-drift-spark", rows.slice(-12), "drift_pct");
+    renderSparkline("kpi-drift-spark", withOsrm.slice(-12), "osrm_drift_pct");
   }
 
   async function renderEfficiencyKpi() {
@@ -304,11 +335,7 @@
   renderBatteryHealthKpi();
 
   renderDistanceChart();
-  renderSingleLineChart("chart-drift", "/api/metrics/drift", "drift_pct", {
-    unit: "%",
-    emptyTitle: "No drift data yet",
-    emptyHint: "Shows up once a completed drive has both odometer and OSRM route distance.",
-  });
+  renderDriftChart();
   renderBarChart("chart-energy-used", "/api/metrics/energy-used", "kwh_used", {
     unit: "kWh",
     emptyTitle: "No energy data yet",
