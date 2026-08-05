@@ -146,7 +146,7 @@
     }
     renderLegend("legend-drift", [
       { label: "OSRMDrift", color: palette.series2 },
-      { label: "HaversineDrift", color: palette.series3 },
+      { label: "GPSDrift", color: palette.series3 },
     ]);
     const ctx = document.getElementById("chart-drift");
     new Chart(ctx, {
@@ -155,7 +155,7 @@
         labels: rows.map((r) => formatLabel(r.date)),
         datasets: [
           { label: "OSRMDrift", data: rows.map((r) => r.osrm_drift_pct), borderColor: palette.series2, backgroundColor: palette.series2, borderWidth: 2, pointRadius: 2, pointHoverRadius: 5, tension: 0.25, spanGaps: true },
-          { label: "HaversineDrift", data: rows.map((r) => r.haversine_drift_pct), borderColor: palette.series3, backgroundColor: palette.series3, borderWidth: 2, pointRadius: 2, pointHoverRadius: 5, tension: 0.25, spanGaps: true },
+          { label: "GPSDrift", data: rows.map((r) => r.haversine_drift_pct), borderColor: palette.series3, backgroundColor: palette.series3, borderWidth: 2, pointRadius: 2, pointHoverRadius: 5, tension: 0.25, spanGaps: true },
         ],
       },
       options: {

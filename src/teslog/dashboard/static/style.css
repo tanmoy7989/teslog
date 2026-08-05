@@ -149,7 +149,7 @@ button:disabled {
   margin-top: 0.5rem;
 }
 
-/* Drift KPI tile: two color-coded values (OSRM, Haversine) instead of one */
+/* Drift KPI tile: two color-coded values (OSRM, GPS) instead of one */
 
 .drift-kpi {
   display: flex;

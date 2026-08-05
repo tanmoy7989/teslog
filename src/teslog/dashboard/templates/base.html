@@ -5,6 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Teslog{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
+
+  <!-- "Add to Home Screen" on iOS: launches standalone (no Safari address bar), with its own
+       icon and title, instead of a bookmark that reopens the browser every time. -->
+  <link rel="manifest" href="{{ url_for('static', path='manifest.json') }}">
+  <link rel="icon" type="image/png" href="{{ url_for('static', path='icons/favicon-32.png') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', path='icons/apple-touch-icon.png') }}">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Teslog">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="theme-color" content="#f9f9f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0d0d0d" media="(prefers-color-scheme: dark)">
 </head>
 <body>
   <header>
