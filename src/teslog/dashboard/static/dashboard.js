@@ -145,8 +145,8 @@
       return;
     }
     renderLegend("legend-drift", [
-      { label: "OSRMDrift", color: palette.series1 },
-      { label: "HaversineDrift", color: palette.series2 },
+      { label: "OSRMDrift", color: palette.series2 },
+      { label: "HaversineDrift", color: palette.series3 },
     ]);
     const ctx = document.getElementById("chart-drift");
     new Chart(ctx, {
@@ -154,8 +154,8 @@
       data: {
         labels: rows.map((r) => formatLabel(r.date)),
         datasets: [
-          { label: "OSRMDrift", data: rows.map((r) => r.osrm_drift_pct), borderColor: palette.series1, backgroundColor: palette.series1, borderWidth: 2, pointRadius: 2, pointHoverRadius: 5, tension: 0.25, spanGaps: true },
-          { label: "HaversineDrift", data: rows.map((r) => r.haversine_drift_pct), borderColor: palette.series2, backgroundColor: palette.series2, borderWidth: 2, pointRadius: 2, pointHoverRadius: 5, tension: 0.25, spanGaps: true },
+          { label: "OSRMDrift", data: rows.map((r) => r.osrm_drift_pct), borderColor: palette.series2, backgroundColor: palette.series2, borderWidth: 2, pointRadius: 2, pointHoverRadius: 5, tension: 0.25, spanGaps: true },
+          { label: "HaversineDrift", data: rows.map((r) => r.haversine_drift_pct), borderColor: palette.series3, backgroundColor: palette.series3, borderWidth: 2, pointRadius: 2, pointHoverRadius: 5, tension: 0.25, spanGaps: true },
         ],
       },
       options: {
@@ -266,26 +266,63 @@
     });
   }
 
+  function renderDualSparkline(canvasId, rows, fieldA, colorA, fieldB, colorB) {
+    const ctx = document.getElementById(canvasId);
+    if (!ctx || !rows || rows.length < 2) return;
+    new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: rows.map((r) => r.date),
+        datasets: [
+          { data: rows.map((r) => r[fieldA]), borderColor: colorA, borderWidth: 2, pointRadius: 0, tension: 0.3, spanGaps: true },
+          { data: rows.map((r) => r[fieldB]), borderColor: colorB, borderWidth: 2, pointRadius: 0, tension: 0.3, spanGaps: true },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: { x: { display: false }, y: { display: false } },
+        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+      },
+    });
+  }
+
+  // Sets a drift KPI sub-row's value to the mean of every non-null `field` reading so far
+  // (all drives to date, not a fixed trailing window), and its delta to their sample standard
+  // deviation — how consistent that drift has been, not a change-vs-previous-drive.
+  function setDriftKpiValue(tile, valueSelector, deltaSelector, rows, field) {
+    const values = (rows || []).map((r) => r[field]).filter((v) => v !== null && v !== undefined);
+    const valueEl = tile.querySelector(valueSelector);
+    const deltaEl = tile.querySelector(deltaSelector);
+    deltaEl.classList.remove("good", "bad");
+    if (values.length === 0) {
+      valueEl.textContent = "—";
+      deltaEl.textContent = "";
+      return;
+    }
+    const mean = values.reduce((sum, v) => sum + v, 0) / values.length;
+    valueEl.textContent = `${mean.toFixed(1)}%`;
+    if (values.length >= 2) {
+      const variance = values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / (values.length - 1);
+      deltaEl.textContent = `±${Math.sqrt(variance).toFixed(1)}pp`;
+    } else {
+      deltaEl.textContent = "";
+    }
+  }
+
   async function renderDriftKpi() {
     const rows = await fetchJSON("/api/metrics/drift");
     const tile = document.getElementById("kpi-drift");
-    const withOsrm = (rows || []).filter((r) => r.osrm_drift_pct !== null && r.osrm_drift_pct !== undefined);
-    if (withOsrm.length === 0) {
-      tile.querySelector(".value").textContent = "—";
-      tile.querySelector(".delta").textContent = "";
-      return;
-    }
-    const latest = withOsrm[withOsrm.length - 1].osrm_drift_pct;
-    tile.querySelector(".value").textContent = `${latest.toFixed(1)}%`;
-    if (withOsrm.length >= 2) {
-      const prev = withOsrm[withOsrm.length - 2].osrm_drift_pct;
-      const delta = latest - prev;
-      const improving = Math.abs(latest) < Math.abs(prev);
-      const deltaEl = tile.querySelector(".delta");
-      deltaEl.textContent = `${delta >= 0 ? "+" : ""}${delta.toFixed(1)}pp vs prev`;
-      deltaEl.classList.add(improving ? "good" : "bad");
-    }
-    renderSparkline("kpi-drift-spark", withOsrm.slice(-12), "osrm_drift_pct");
+    setDriftKpiValue(tile, ".drift-value-osrm", ".drift-delta-osrm", rows, "osrm_drift_pct");
+    setDriftKpiValue(tile, ".drift-value-haversine", ".drift-delta-haversine", rows, "haversine_drift_pct");
+    renderDualSparkline(
+      "kpi-drift-spark",
+      (rows || []).slice(-12),
+      "osrm_drift_pct",
+      palette.series2,
+      "haversine_drift_pct",
+      palette.series3
+    );
   }
 
   async function renderEfficiencyKpi() {

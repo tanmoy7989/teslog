@@ -149,6 +149,42 @@ button:disabled {
   margin-top: 0.5rem;
 }
 
+/* Drift KPI tile: two color-coded values (OSRM, Haversine) instead of one */
+
+.drift-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.drift-kpi-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+}
+
+.drift-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.drift-kpi-name {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  width: 4.5rem;
+}
+
+.stat-tile .drift-kpi .value {
+  font-size: 1.3rem;
+}
+
+.stat-tile .drift-kpi .delta {
+  font-size: 0.78rem;
+}
+
 /* Meter (battery health) */
 
 .meter-track {

@@ -8,10 +8,20 @@
 {% block content %}
 <section class="kpi-row">
   <div class="stat-tile" id="kpi-drift">
-    <div class="label">Odometer drift (OSRM)</div>
-    <div class="value-row">
-      <span class="value">—</span>
-      <span class="delta"></span>
+    <div class="label">Odometer drift</div>
+    <div class="drift-kpi">
+      <div class="drift-kpi-row">
+        <span class="drift-dot" style="background: var(--series-2)"></span>
+        <span class="drift-kpi-name">OSRM</span>
+        <span class="value drift-value-osrm">—</span>
+        <span class="delta drift-delta-osrm"></span>
+      </div>
+      <div class="drift-kpi-row">
+        <span class="drift-dot" style="background: var(--series-3)"></span>
+        <span class="drift-kpi-name">Haversine</span>
+        <span class="value drift-value-haversine">—</span>
+        <span class="delta drift-delta-haversine"></span>
+      </div>
     </div>
     <div class="sparkline-wrap"><canvas id="kpi-drift-spark"></canvas></div>
   </div>
