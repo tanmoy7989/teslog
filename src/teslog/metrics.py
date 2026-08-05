@@ -63,9 +63,9 @@ def drift_pct_series(session: Session, car_id: int, limit: int = 200) -> list[di
 
     OSRMDrift — vs. OSRM's routed distance between the drive's start/end points (what the road
     network says the trip *should* have taken — diverges if you didn't take the shortest route).
-    HaversineDrift — vs. the GPS trace distance (straight-line hops between every recorded point
-    along the path actually driven) — should track the odometer closely, since both describe the
-    same real path.
+    GPSDrift (haversine_drift_pct) — vs. the GPS trace distance (straight-line hops between every
+    recorded point along the path actually driven) — should track the odometer closely, since
+    both describe the same real path.
     """
     rows = session.execute(
         select(

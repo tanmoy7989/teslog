@@ -3,7 +3,7 @@
 Stats dashboard for [TeslaMate](https://github.com/teslamate-org/teslamate): for each completed
 drive, compares an OSRM-routed driving distance and the GPS trace distance against the car's
 actual odometer delta, and surfaces the drift between them as two separate metrics — **OSRMDrift**
-and **HaversineDrift** (see [How it works](#how-it-works)).
+and **GPSDrift** (see [How it works](#how-it-works)).
 
 Runs on macOS and Linux, including a Raspberry Pi. No MQTT, no Grafana — Teslog is its own
 dashboard and doesn't need live status. Real-time nav-drift tracking (MQTT-based) is planned next —
@@ -102,7 +102,7 @@ reverting to the defaults. If the `gdrive` remote isn't configured yet, each exp
 that it's skipping itself (see `drive-export.log` in the repo) instead of failing loudly — `up`
 still starts the server regardless.
 
-The CSV has one row per drive (`type=drive`: OSRMDrift %, HaversineDrift %, odometer/OSRM/GPS
+The CSV has one row per drive (`type=drive`: OSRMDrift %, GPSDrift %, odometer/OSRM/GPS
 distances, energy used, Wh/km), one row per charging session (`type=charge`: kWh added, cost — a
 separate kind of event from a drive, with its own timestamps), and one `type=battery` row per
 export run with the current battery health %. Most columns are blank on rows they don't apply to.
@@ -123,7 +123,11 @@ See [config/.env.example](config/.env.example) for all variables. Notable ones:
 | `OSRM_BASE_URL` | OSRM routing server (public demo by default) |
 | `TESLOG_SYNC_INTERVAL_SECONDS` | How often to check for new drives (default 900) |
 
-No login on the dashboard itself — it's built for LAN-only use.
+No login on the dashboard itself — it's built for LAN-only use. For access away from home, put it
+on a private network you control (e.g. [Tailscale](https://tailscale.com/)) rather than exposing it
+to the public internet. On iPhone, open it in Safari and use Share → Add to Home Screen — the app
+has its own icon and manifest, so it launches full-screen with no browser address bar, like a real
+app rather than a bookmark (Safari only; other iOS browsers don't support this).
 
 ## How it works
 
@@ -138,11 +142,17 @@ things:
   given only the drive's start/end points and asked for the shortest route between them per
   OpenStreetMap's road network — it has no idea what path you actually took. So this tracks how
   much your actual route diverged from the "optimal" one, not GPS/odometer error.
-- **HaversineDrift** — `(odometer_delta - gps_trace_distance) / gps_trace_distance * 100`, where
-  `gps_trace_distance` is the sum of the haversine (straight-line) distance between every
-  consecutive GPS point TeslaMate recorded along the drive. Since this traces the path you actually
-  drove (same as the odometer), it should stay close to zero — a persistent nonzero HaversineDrift
-  would point at real odometer or GPS inaccuracy, rather than just route choice.
+- **GPSDrift** (`haversine_drift_pct` in the API/CSV — computed via the haversine formula, kept
+  as-is there since it's an established field name) — `(odometer_delta - gps_trace_distance) /
+  gps_trace_distance * 100`, where `gps_trace_distance` is the sum of the straight-line distance
+  between every consecutive GPS point TeslaMate recorded along the drive. Since this traces the
+  path you actually drove (same as the odometer), it should stay close to zero — a persistent
+  nonzero GPSDrift would point at real odometer or GPS inaccuracy, rather than just route choice.
+
+The dashboard's "Odometer drift" KPI tile shows each metric's **mean and sample standard
+deviation across every drive synced so far** (not a fixed trailing window, and not just the latest
+drive) — read the value as "typical drift" and the `±` delta as how consistent that's been, not a
+change-vs-previous-drive indicator like the other KPI tiles.
 
 TeslaMate still logs every drive it always has — Teslog doesn't touch that. But short back-and-forth
 movements (backing into a tight garage, a driving lesson, three-point turns) aren't real "drives"
