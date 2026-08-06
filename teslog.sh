@@ -44,7 +44,11 @@ set_env() {
 install_export_cron() {
     local hours="$1" repo_dir
     repo_dir="$(pwd)"
-    { crontab -l 2>/dev/null | grep -vF "$CRON_TAG"
+    # The `|| true` matters: with no pre-existing crontab (a fresh Pi, or one where this is the
+    # only cron job ever installed), `crontab -l` and/or `grep -vF` finding nothing to keep both
+    # exit non-zero — under `set -e` that would abort this function before the line below ever
+    # gets written, silently leaving nothing scheduled.
+    { crontab -l 2>/dev/null | grep -vF "$CRON_TAG" || true
       echo "0 */${hours} * * * cd ${repo_dir} && ./scripts/export-to-drive.sh >> drive-export.log 2>&1 ${CRON_TAG}"
     } | crontab -
 }
