@@ -19,6 +19,16 @@ from teslog.db import DriveRouteComparison, get_teslog_sessionmaker
 
 # --- Distance (Teslog DB) ----------------------------------------------------
 
+# Every distance is stored and computed internally in km — TeslaMate's own unit, and what OSRM/
+# haversine already return. Only converted to miles at the point a series is handed to the API/
+# dashboard/export; energy (kWh) and drift (%, a ratio) aren't distances and stay as-is.
+_KM_TO_MI = 0.621371
+
+
+def _mi(km: float | None) -> float | None:
+    return round(km * _KM_TO_MI, 2) if km is not None else None
+
+
 # Front-and-back garage shuffles, three-point turns, driving lessons: real movement, but not a
 # "drive" worth tracking. Excluded wherever the smaller of OSRM route distance / odometer delta
 # is below this, so a short GPS blip doesn't get counted just because the odometer briefly moved.
@@ -95,7 +105,7 @@ def drift_pct_series(session: Session, car_id: int, limit: int = 200) -> list[di
 
 
 def distance_comparison_series(session: Session, car_id: int, limit: int = 200) -> list[dict[str, Any]]:
-    """Odometer delta vs OSRM route distance vs GPS trace distance, per drive."""
+    """Odometer delta vs OSRM route distance vs GPS trace distance, per drive (in miles)."""
     rows = session.execute(
         select(
             DriveRouteComparison.drive_start_at,
@@ -110,9 +120,9 @@ def distance_comparison_series(session: Session, car_id: int, limit: int = 200) 
     return [
         {
             "date": row.drive_start_at.isoformat(),
-            "odometer_km": row.odometer_delta,
-            "osrm_km": row.osrm_route_distance,
-            "gps_km": row.gps_trace_distance,
+            "odometer_mi": _mi(row.odometer_delta),
+            "osrm_mi": _mi(row.osrm_route_distance),
+            "gps_mi": _mi(row.gps_trace_distance),
         }
         for row in rows
     ]
@@ -154,7 +164,7 @@ def energy_used_series(session: Session, car_id: int, limit: int = 200) -> list[
 
 
 def energy_efficiency_series(session: Session, car_id: int, limit: int = 200) -> list[dict[str, Any]]:
-    """Actual Wh/km for each drive (vs. the car's nominal rated efficiency)."""
+    """Actual Wh/mi for each drive (vs. the car's nominal rated efficiency)."""
     excluded = _excluded_short_trip_ids(car_id)
     result = []
     for row in reversed(_energy_rows(session, car_id, limit)):
@@ -162,8 +172,8 @@ def energy_efficiency_series(session: Session, car_id: int, limit: int = 200) ->
             continue
         range_used_km = float(row.start_rated_range_km) - float(row.end_rated_range_km)
         kwh_used = max(0.0, range_used_km * row.efficiency / 1000)
-        wh_per_km = (kwh_used * 1000) / row.distance
-        result.append({"date": row.start_date.isoformat(), "wh_per_km": round(wh_per_km, 1)})
+        wh_per_mi = (kwh_used * 1000) / (row.distance * _KM_TO_MI)
+        result.append({"date": row.start_date.isoformat(), "wh_per_mi": round(wh_per_mi, 1)})
     return result
 
 
@@ -240,9 +250,9 @@ def _drive_comparisons_by_id(session: Session, car_id: int) -> dict[int, dict[st
             "date": row.drive_start_at.isoformat(),
             "osrm_drift_pct": _drift_pct(row.odometer_delta, row.osrm_route_distance),
             "haversine_drift_pct": _drift_pct(row.odometer_delta, row.gps_trace_distance),
-            "odometer_km": row.odometer_delta,
-            "osrm_km": row.osrm_route_distance,
-            "gps_km": row.gps_trace_distance,
+            "odometer_mi": _mi(row.odometer_delta),
+            "osrm_mi": _mi(row.osrm_route_distance),
+            "gps_mi": _mi(row.gps_trace_distance),
         }
         for row in rows
     }
@@ -259,7 +269,7 @@ def _drive_energy_by_id(session: Session, car_id: int) -> dict[int, dict[str, An
         result[row.id] = {
             "date": row.start_date.isoformat(),
             "kwh_used": round(kwh_used, 2),
-            "wh_per_km": round((kwh_used * 1000) / row.distance, 1),
+            "wh_per_mi": round((kwh_used * 1000) / (row.distance * _KM_TO_MI), 1),
         }
     return result
 

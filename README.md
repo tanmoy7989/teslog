@@ -103,9 +103,11 @@ that it's skipping itself (see `drive-export.log` in the repo) instead of failin
 still starts the server regardless.
 
 The CSV has one row per drive (`type=drive`: OSRMDrift %, GPSDrift %, odometer/OSRM/GPS
-distances, energy used, Wh/km), one row per charging session (`type=charge`: kWh added, cost — a
-separate kind of event from a drive, with its own timestamps), and one `type=battery` row per
-export run with the current battery health %. Most columns are blank on rows they don't apply to.
+distances in miles, energy used, Wh/mi), one row per charging session (`type=charge`: kWh added,
+cost — a separate kind of event from a drive, with its own timestamps), and one `type=battery` row
+per export run with the current battery health %. Most columns are blank on rows they don't apply
+to. (Charging cost isn't shown on the dashboard itself — see [How it works](#how-it-works) — but
+it's still in the export if TeslaMate has pricing configured.)
 
 To run it by hand (e.g. to test your rclone setup without waiting for the cron):
 
@@ -135,8 +137,19 @@ On a fixed interval (and via the dashboard's "Sync now" button), Teslog reads co
 their GPS trace directly from TeslaMate's Postgres database, calls OSRM for the routed distance
 between start and end, and stores the comparison in its own `drive_route_comparisons` table.
 
-Two drift metrics are reported, plotted together on the same chart, because they measure different
-things:
+Every distance is stored and computed internally in km — TeslaMate's own unit — and only converted
+to miles at the point a number is handed to the dashboard, API, or CSV export. Energy (kWh) isn't a
+distance and stays as-is; drift (%) is a ratio of two same-unit distances, so it comes out identical
+regardless of which unit they're in.
+
+The dashboard is laid out in two columns: **Distance** (left) and **Energy** (right), each three
+charts stacked vertically, under a shared KPI row.
+
+Distance has three charts, all sharing the same colors for OSRM route (orange) and GPS trace
+(green): the existing odometer/OSRM/GPS-vs-time line chart; a new scatter of each drive's OSRM/GPS
+distance plotted against its odometer reading, with a dashed reference line marking where a point
+would land if the traced distance matched the odometer exactly; and the two drift metrics below,
+plotted together on one chart because they measure different things:
 
 - **OSRMDrift** — `(odometer_delta - osrm_route_distance) / osrm_route_distance * 100`. OSRM is
   given only the drive's start/end points and asked for the shortest route between them per
@@ -149,10 +162,17 @@ things:
   path you actually drove (same as the odometer), it should stay close to zero — a persistent
   nonzero GPSDrift would point at real odometer or GPS inaccuracy, rather than just route choice.
 
-The dashboard's "Odometer drift" KPI tile shows each metric's **mean and sample standard
-deviation across every drive synced so far** (not a fixed trailing window, and not just the latest
-drive) — read the value as "typical drift" and the `±` delta as how consistent that's been, not a
-change-vs-previous-drive indicator like the other KPI tiles.
+Energy has three charts: energy used and efficiency per drive, and charging energy added per
+session. (Charging cost isn't shown here — see the note in
+[Backing up to Google Drive](#backing-up-to-google-drive) — since it's only meaningful if
+TeslaMate has electricity pricing configured, which isn't everyone's setup.)
+
+Two of the KPI tiles — **Odometer drift** and **Efficiency** — show each metric's **mean and
+sample standard deviation across every drive synced so far** (not a fixed trailing window, and not
+just the latest drive): read the big number as "typical," and the `±` delta as how consistent
+that's been, not a change-vs-previous-drive indicator. **Battery health** is TeslaMateApi's own
+reported figure, passed through unchanged — it can occasionally read slightly over 100% (Tesla's
+own range-estimate calibration noise), which is expected and not a Teslog calculation issue.
 
 TeslaMate still logs every drive it always has — Teslog doesn't touch that. But short back-and-forth
 movements (backing into a tight garage, a driving lesson, three-point turns) aren't real "drives"

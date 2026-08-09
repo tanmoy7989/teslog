@@ -34,86 +34,104 @@
     <div class="meter-track">
       <div class="meter-fill" style="width: 0%"></div>
     </div>
+    <div class="caveat">Tesla's own reported figure — can read slightly over 100% due to range-estimate calibration, not a Teslog calculation.</div>
   </div>
 
   <div class="stat-tile" id="kpi-efficiency">
-    <div class="label">Efficiency (Wh/km, latest drive)</div>
+    <div class="label">Efficiency (Wh/mi)</div>
     <div class="value-row">
       <span class="value">—</span>
+      <span class="delta"></span>
     </div>
-    <div class="sparkline-wrap"><canvas id="kpi-efficiency-spark"></canvas></div>
   </div>
 </section>
 
-<section class="charts-grid">
-  <div class="chart-card">
-    <div class="chart-head">
-      <div>
-        <h2>Distance comparison</h2>
-        <div class="chart-desc">Odometer vs. OSRM route vs. GPS trace, per drive</div>
-      </div>
-      <a class="csv-link" href="/api/metrics/distance.csv" download>Download CSV</a>
+<div class="dash-columns">
+  <div class="dash-column">
+    <div class="dash-section-head">
+      <h2>Distance</h2>
     </div>
-    <div id="legend-distance" class="chart-legend"></div>
-    <div class="chart-canvas-wrap"><canvas id="chart-distance"></canvas></div>
+
+    <div class="charts-stack">
+      <div class="chart-card">
+        <div class="chart-head">
+          <div>
+            <h2>Distance comparison</h2>
+            <div class="chart-desc">Odometer vs. OSRM route vs. GPS trace, per drive</div>
+          </div>
+          <a class="csv-link" href="/api/metrics/distance.csv" download>Download CSV</a>
+        </div>
+        <div id="legend-distance" class="chart-legend"></div>
+        <div class="chart-canvas-wrap"><canvas id="chart-distance"></canvas></div>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-head">
+          <div>
+            <h2>Odometer vs. traced distance</h2>
+            <div class="chart-desc">Each drive's OSRM route / GPS trace distance, plotted against its odometer reading</div>
+          </div>
+          <a class="csv-link" href="/api/metrics/distance.csv" download>Download CSV</a>
+        </div>
+        <div id="legend-scatter" class="chart-legend"></div>
+        <div class="chart-canvas-wrap"><canvas id="chart-scatter"></canvas></div>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-head">
+          <div>
+            <h2>Odometer drift %</h2>
+            <div class="chart-desc">OSRMDrift: vs. OSRM's routed distance. GPSDrift: vs. the GPS trace.</div>
+          </div>
+          <a class="csv-link" href="/api/metrics/drift.csv" download>Download CSV</a>
+        </div>
+        <div id="legend-drift" class="chart-legend"></div>
+        <div class="chart-canvas-wrap"><canvas id="chart-drift"></canvas></div>
+      </div>
+    </div>
   </div>
 
-  <div class="chart-card">
-    <div class="chart-head">
-      <div>
-        <h2>Odometer drift %</h2>
-        <div class="chart-desc">OSRMDrift: vs. OSRM's routed distance. GPSDrift: vs. the GPS trace.</div>
-      </div>
-      <a class="csv-link" href="/api/metrics/drift.csv" download>Download CSV</a>
+  <div class="dash-column">
+    <div class="dash-section-head">
+      <h2>Energy</h2>
     </div>
-    <div id="legend-drift" class="chart-legend"></div>
-    <div class="chart-canvas-wrap"><canvas id="chart-drift"></canvas></div>
-  </div>
 
-  <div class="chart-card">
-    <div class="chart-head">
-      <div>
-        <h2>Energy used</h2>
-        <div class="chart-desc">kWh used per drive, from rated-range consumed</div>
+    <div class="charts-stack">
+      <div class="chart-card">
+        <div class="chart-head">
+          <div>
+            <h2>Energy used</h2>
+            <div class="chart-desc">kWh used per drive, from rated-range consumed</div>
+          </div>
+          <a class="csv-link" href="/api/metrics/energy-used.csv" download>Download CSV</a>
+        </div>
+        <div class="chart-canvas-wrap"><canvas id="chart-energy-used"></canvas></div>
       </div>
-      <a class="csv-link" href="/api/metrics/energy-used.csv" download>Download CSV</a>
-    </div>
-    <div class="chart-canvas-wrap"><canvas id="chart-energy-used"></canvas></div>
-  </div>
 
-  <div class="chart-card">
-    <div class="chart-head">
-      <div>
-        <h2>Efficiency</h2>
-        <div class="chart-desc">Actual Wh/km per drive</div>
+      <div class="chart-card">
+        <div class="chart-head">
+          <div>
+            <h2>Efficiency</h2>
+            <div class="chart-desc">Actual Wh/mi per drive</div>
+          </div>
+          <a class="csv-link" href="/api/metrics/energy-efficiency.csv" download>Download CSV</a>
+        </div>
+        <div class="chart-canvas-wrap"><canvas id="chart-energy-efficiency"></canvas></div>
       </div>
-      <a class="csv-link" href="/api/metrics/energy-efficiency.csv" download>Download CSV</a>
-    </div>
-    <div class="chart-canvas-wrap"><canvas id="chart-energy-efficiency"></canvas></div>
-  </div>
 
-  <div class="chart-card">
-    <div class="chart-head">
-      <div>
-        <h2>Charging energy added</h2>
-        <div class="chart-desc">kWh added per charging session</div>
+      <div class="chart-card">
+        <div class="chart-head">
+          <div>
+            <h2>Charging energy added</h2>
+            <div class="chart-desc">kWh added per charging session</div>
+          </div>
+          <a class="csv-link" href="/api/metrics/charging-energy.csv" download>Download CSV</a>
+        </div>
+        <div class="chart-canvas-wrap"><canvas id="chart-charging-energy"></canvas></div>
       </div>
-      <a class="csv-link" href="/api/metrics/charging-energy.csv" download>Download CSV</a>
     </div>
-    <div class="chart-canvas-wrap"><canvas id="chart-charging-energy"></canvas></div>
   </div>
-
-  <div class="chart-card">
-    <div class="chart-head">
-      <div>
-        <h2>Charging cost</h2>
-        <div class="chart-desc">Per charging session, where tracked</div>
-      </div>
-      <a class="csv-link" href="/api/metrics/charging-cost.csv" download>Download CSV</a>
-    </div>
-    <div class="chart-canvas-wrap"><canvas id="chart-charging-cost"></canvas></div>
-  </div>
-</section>
+</div>
 {% endblock %}
 
 {% block scripts %}

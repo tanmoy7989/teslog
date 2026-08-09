@@ -39,12 +39,13 @@
     return response.json();
   }
 
-  function baseScales(extraY = {}) {
+  function baseScales(extraY = {}, extraX = {}) {
     return {
       x: {
         grid: { color: palette.gridline, drawTicks: false },
         border: { color: palette.baseline },
         ticks: { color: palette.textMuted, maxRotation: 0, autoSkip: true, font: { size: 11 } },
+        ...extraX,
       },
       y: {
         beginAtZero: true,
@@ -96,7 +97,7 @@
       const span = document.createElement("span");
       span.className = "legend-item";
       const swatch = document.createElement("span");
-      swatch.className = "swatch";
+      swatch.className = "swatch" + (item.dot ? " dot" : "");
       swatch.style.background = item.color;
       const label = document.createElement("span");
       label.textContent = item.label;
@@ -123,17 +124,95 @@
       data: {
         labels: rows.map((r) => formatLabel(r.date)),
         datasets: [
-          { label: "Odometer", data: rows.map((r) => r.odometer_km), borderColor: palette.series1, backgroundColor: palette.series1, borderWidth: 2, pointRadius: 2, pointHoverRadius: 5, tension: 0.25 },
-          { label: "OSRM route", data: rows.map((r) => r.osrm_km), borderColor: palette.series2, backgroundColor: palette.series2, borderWidth: 2, pointRadius: 2, pointHoverRadius: 5, tension: 0.25 },
-          { label: "GPS trace", data: rows.map((r) => r.gps_km), borderColor: palette.series3, backgroundColor: palette.series3, borderWidth: 2, pointRadius: 2, pointHoverRadius: 5, tension: 0.25 },
+          { label: "Odometer", data: rows.map((r) => r.odometer_mi), borderColor: palette.series1, backgroundColor: palette.series1, borderWidth: 2, pointRadius: 2, pointHoverRadius: 5, tension: 0.25 },
+          { label: "OSRM route", data: rows.map((r) => r.osrm_mi), borderColor: palette.series2, backgroundColor: palette.series2, borderWidth: 2, pointRadius: 2, pointHoverRadius: 5, tension: 0.25 },
+          { label: "GPS trace", data: rows.map((r) => r.gps_mi), borderColor: palette.series3, backgroundColor: palette.series3, borderWidth: 2, pointRadius: 2, pointHoverRadius: 5, tension: 0.25 },
         ],
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
         interaction: { mode: "index", intersect: false },
-        scales: baseScales({ title: { display: true, text: "km", color: palette.textMuted, font: { size: 11 } } }),
+        scales: baseScales({ title: { display: true, text: "mi", color: palette.textMuted, font: { size: 11 } } }),
         plugins: { legend: { display: false }, tooltip: tooltipConfig() },
+      },
+    });
+    return rows;
+  }
+
+  // Odometer (x) vs. OSRM / GPS traced distance (y), one point per drive, plus a y=x reference
+  // line — points on the line mean the traced distance matched the odometer exactly.
+  async function renderScatterChart(distanceRows) {
+    const rows = distanceRows || (await fetchJSON("/api/metrics/distance"));
+    if (!rows || rows.length === 0) {
+      showEmpty("chart-scatter", "No completed drives yet", "Charts fill in once TeslaMate records a drive.");
+      return;
+    }
+    renderLegend("legend-scatter", [
+      { label: "OSRM route", color: palette.series2, dot: true },
+      { label: "GPS trace", color: palette.series3, dot: true },
+    ]);
+    const allVals = rows.flatMap((r) => [r.odometer_mi, r.osrm_mi, r.gps_mi]).filter((v) => v !== null && v !== undefined);
+    const lo = Math.floor(Math.min(...allVals) - 0.5);
+    const hi = Math.ceil(Math.max(...allVals) + 0.5);
+
+    const ctx = document.getElementById("chart-scatter");
+    new Chart(ctx, {
+      type: "line",
+      data: {
+        datasets: [
+          {
+            label: "Perfect agreement",
+            data: [{ x: lo, y: lo }, { x: hi, y: hi }],
+            borderColor: palette.baseline,
+            borderWidth: 1.5,
+            borderDash: [4, 4],
+            pointRadius: 0,
+            showLine: true,
+            order: 3,
+          },
+          {
+            label: "OSRM route",
+            data: rows.map((r) => ({ x: r.odometer_mi, y: r.osrm_mi })),
+            borderColor: palette.series2,
+            backgroundColor: palette.series2,
+            showLine: false,
+            pointRadius: 4,
+            pointHoverRadius: 6,
+            order: 1,
+          },
+          {
+            label: "GPS trace",
+            data: rows.map((r) => ({ x: r.odometer_mi, y: r.gps_mi })),
+            borderColor: palette.series3,
+            backgroundColor: palette.series3,
+            showLine: false,
+            pointRadius: 4,
+            pointHoverRadius: 6,
+            order: 2,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: "nearest", intersect: true },
+        scales: baseScales(
+          { title: { display: true, text: "traced distance (mi)", color: palette.textMuted, font: { size: 11 } }, beginAtZero: false, min: lo, max: hi },
+          { type: "linear", title: { display: true, text: "odometer (mi)", color: palette.textMuted, font: { size: 11 } }, min: lo, max: hi }
+        ),
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            ...tooltipConfig(),
+            mode: "nearest",
+            intersect: true,
+            filter: (item) => item.datasetIndex !== 0,
+            callbacks: {
+              label: (item) => `${item.dataset.label}: ${item.parsed.y.toFixed(2)} mi (odo ${item.parsed.x.toFixed(2)} mi)`,
+            },
+          },
+        },
       },
     });
   }
@@ -236,36 +315,6 @@
     });
   }
 
-  function renderSparkline(canvasId, rows, field) {
-    const values = (rows || []).filter((r) => r[field] !== null && r[field] !== undefined);
-    if (values.length < 2) return;
-    const ctx = document.getElementById(canvasId);
-    if (!ctx) return;
-    new Chart(ctx, {
-      type: "line",
-      data: {
-        labels: rows.map((r) => r.date),
-        datasets: [
-          {
-            data: rows.map((r) => r[field]),
-            borderColor: palette.series1,
-            backgroundColor: withAlpha(palette.series1, 0.1),
-            borderWidth: 2,
-            pointRadius: 0,
-            tension: 0.3,
-            fill: true,
-          },
-        ],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: { x: { display: false }, y: { display: false } },
-        plugins: { legend: { display: false }, tooltip: { enabled: false } },
-      },
-    });
-  }
-
   function renderDualSparkline(canvasId, rows, fieldA, colorA, fieldB, colorB) {
     const ctx = document.getElementById(canvasId);
     if (!ctx || !rows || rows.length < 2) return;
@@ -287,10 +336,21 @@
     });
   }
 
-  // Sets a drift KPI sub-row's value to the mean of every non-null `field` reading so far
-  // (all drives to date, not a fixed trailing window), and its delta to their sample standard
-  // deviation — how consistent that drift has been, not a change-vs-previous-drive.
-  function setDriftKpiValue(tile, valueSelector, deltaSelector, rows, field) {
+  function mean(values) {
+    return values.reduce((sum, v) => sum + v, 0) / values.length;
+  }
+
+  // Sample (N-1) standard deviation — null if there's fewer than 2 values to compare.
+  function sampleStdev(values, avg) {
+    if (values.length < 2) return null;
+    const variance = values.reduce((sum, v) => sum + (v - avg) ** 2, 0) / (values.length - 1);
+    return Math.sqrt(variance);
+  }
+
+  // Sets a KPI sub-row's value to the mean of every non-null `field` reading so far (all drives
+  // to date, not a fixed trailing window), and its delta to their sample standard deviation —
+  // how consistent that's been, not a change-vs-previous-drive.
+  function setMeanStdevKpiValue(tile, valueSelector, deltaSelector, rows, field, formatValue, formatDelta) {
     const values = (rows || []).map((r) => r[field]).filter((v) => v !== null && v !== undefined);
     const valueEl = tile.querySelector(valueSelector);
     const deltaEl = tile.querySelector(deltaSelector);
@@ -300,21 +360,19 @@
       deltaEl.textContent = "";
       return;
     }
-    const mean = values.reduce((sum, v) => sum + v, 0) / values.length;
-    valueEl.textContent = `${mean.toFixed(1)}%`;
-    if (values.length >= 2) {
-      const variance = values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / (values.length - 1);
-      deltaEl.textContent = `±${Math.sqrt(variance).toFixed(1)}pp`;
-    } else {
-      deltaEl.textContent = "";
-    }
+    const avg = mean(values);
+    valueEl.textContent = formatValue(avg);
+    const stdev = sampleStdev(values, avg);
+    deltaEl.textContent = stdev === null ? "" : formatDelta(stdev);
   }
 
   async function renderDriftKpi() {
     const rows = await fetchJSON("/api/metrics/drift");
     const tile = document.getElementById("kpi-drift");
-    setDriftKpiValue(tile, ".drift-value-osrm", ".drift-delta-osrm", rows, "osrm_drift_pct");
-    setDriftKpiValue(tile, ".drift-value-haversine", ".drift-delta-haversine", rows, "haversine_drift_pct");
+    const fmtValue = (v) => `${v.toFixed(1)}%`;
+    const fmtDelta = (v) => `±${v.toFixed(1)}pp`;
+    setMeanStdevKpiValue(tile, ".drift-value-osrm", ".drift-delta-osrm", rows, "osrm_drift_pct", fmtValue, fmtDelta);
+    setMeanStdevKpiValue(tile, ".drift-value-haversine", ".drift-delta-haversine", rows, "haversine_drift_pct", fmtValue, fmtDelta);
     renderDualSparkline(
       "kpi-drift-spark",
       (rows || []).slice(-12),
@@ -328,13 +386,15 @@
   async function renderEfficiencyKpi() {
     const rows = await fetchJSON("/api/metrics/energy-efficiency");
     const tile = document.getElementById("kpi-efficiency");
-    if (!rows || rows.length === 0) {
-      tile.querySelector(".value").textContent = "—";
-      return;
-    }
-    const latest = rows[rows.length - 1].wh_per_km;
-    tile.querySelector(".value").textContent = `${Math.round(latest)}`;
-    renderSparkline("kpi-efficiency-spark", rows.slice(-12), "wh_per_km");
+    setMeanStdevKpiValue(
+      tile,
+      ".value",
+      ".delta",
+      rows,
+      "wh_per_mi",
+      (v) => `${Math.round(v)}`,
+      (v) => `±${Math.round(v)} Wh/mi`
+    );
   }
 
   async function renderBatteryHealthKpi() {
@@ -371,15 +431,15 @@
   renderEfficiencyKpi();
   renderBatteryHealthKpi();
 
-  renderDistanceChart();
+  renderDistanceChart().then((rows) => renderScatterChart(rows));
   renderDriftChart();
   renderBarChart("chart-energy-used", "/api/metrics/energy-used", "kwh_used", {
     unit: "kWh",
     emptyTitle: "No energy data yet",
     emptyHint: "Needs completed drives and a car with a learned rated efficiency.",
   });
-  renderSingleLineChart("chart-energy-efficiency", "/api/metrics/energy-efficiency", "wh_per_km", {
-    unit: "Wh/km",
+  renderSingleLineChart("chart-energy-efficiency", "/api/metrics/energy-efficiency", "wh_per_mi", {
+    unit: "Wh/mi",
     emptyTitle: "No efficiency data yet",
     emptyHint: "Needs completed drives and a car with a learned rated efficiency.",
   });
@@ -387,10 +447,5 @@
     unit: "kWh",
     emptyTitle: "No charging sessions yet",
     emptyHint: "Shows up once TeslaMate records a completed charge.",
-  });
-  renderBarChart("chart-charging-cost", "/api/metrics/charging-cost", "cost", {
-    unit: "cost",
-    emptyTitle: "No charging cost data",
-    emptyHint: "TeslaMate only tracks this if you've configured electricity pricing.",
   });
 })();

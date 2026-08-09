@@ -48,11 +48,20 @@ CAR_ID = 1
 # tests/data/ (not by re-running the app's own formulas) — see the
 # odometer/osrm/gps distance columns in tests/data/teslog_seed.sql and the
 # kwh_used / wh_per_km comments in teslamate_seed.sql for the inputs these
-# come from.
+# come from. Distance/efficiency are reported in miles (converted from the
+# km-native TeslaMate/Teslog data at the API boundary — see metrics.py's
+# _mi()/_KM_TO_MI), so the km figures are converted here too (x0.621371,
+# same rounding as _mi()) rather than duplicating separate fixture data.
+_KM_TO_MI = 0.621371
 EXPECTED_OSRM_DRIFT_PCT = [4.35, 3.85, 4.32, 3.77, 4.48]
 EXPECTED_HAVERSINE_DRIFT_PCT = [-2.44, -2.17, -1.36, -1.79, -2.1]
+EXPECTED_ODOMETER_MI = [round(x * _KM_TO_MI, 2) for x in (12.0, 13.5, 14.5, 11.0, 14.0)]
 EXPECTED_KWH_USED = [2.43, 2.74, 2.89, 2.28, 2.89]
-EXPECTED_WH_PER_KM = [202.7, 202.7, 199.2, 207.3, 206.3]
+# Computed from the same raw inputs as EXPECTED_KWH_USED (teslamate_seed.sql's per-drive
+# distance/rated-range and the car's 152.0 Wh/km efficiency), not by converting the already
+# *rounded* Wh/km figure — that loses precision right at the rounding boundary and can disagree
+# with the app's actual (unrounded-until-the-end) computation by 0.1 at one or two indices.
+EXPECTED_WH_PER_MI = [326.2, 326.2, 320.5, 333.6, 332.0]
 EXPECTED_CHARGE_ENERGY = [25.40, 30.10, 18.75]
 EXPECTED_CHARGE_COST = [8.50, 10.20, None]
 
@@ -158,13 +167,13 @@ def test_dashboard_shows_seeded_data(live_app):
 
         distance = client.get("/api/metrics/distance").json()
         assert len(distance) == 5
-        assert distance[0]["odometer_km"] == 12.0
+        assert [row["odometer_mi"] for row in distance] == EXPECTED_ODOMETER_MI
 
         energy_used = client.get("/api/metrics/energy-used").json()
         assert [row["kwh_used"] for row in energy_used] == EXPECTED_KWH_USED
 
         efficiency = client.get("/api/metrics/energy-efficiency").json()
-        assert [row["wh_per_km"] for row in efficiency] == EXPECTED_WH_PER_KM
+        assert [row["wh_per_mi"] for row in efficiency] == EXPECTED_WH_PER_MI
 
         charging_energy = client.get("/api/metrics/charging-energy").json()
         assert [row["kwh_added"] for row in charging_energy] == EXPECTED_CHARGE_ENERGY
@@ -216,8 +225,19 @@ def test_dashboard_shows_seeded_data(live_app):
         battery_value = page.locator("#kpi-battery .value").inner_text()
         assert battery_value == "—"
 
-        # Chart canvases actually mounted (Chart.js draws into a <canvas>).
+        # Efficiency KPI: same mean +/- sample stdev contract as the drift tile, in Wh/mi,
+        # rounded to whole numbers (dashboard.js Math.round).
+        efficiency_value = page.locator("#kpi-efficiency .value").inner_text()
+        assert efficiency_value == f"{round(statistics.mean(EXPECTED_WH_PER_MI))}"
+        efficiency_delta = page.locator("#kpi-efficiency .delta").inner_text()
+        assert efficiency_delta == f"±{round(statistics.stdev(EXPECTED_WH_PER_MI))} Wh/mi"
+
+        # Chart canvases actually mounted (Chart.js draws into a <canvas>) — including the new
+        # odometer-vs-traced-distance scatter — and charging cost is gone (chart removed from
+        # the dashboard grid; the API/export field itself is untouched, see routes.py).
         assert page.locator("#chart-drift").count() == 1
         assert page.locator("#chart-distance").count() == 1
+        assert page.locator("#chart-scatter").count() == 1
+        assert page.locator("#chart-charging-cost").count() == 0
 
         browser.close()

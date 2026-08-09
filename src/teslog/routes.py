@@ -40,9 +40,9 @@ async def trigger_sync() -> dict[str, int]:
 # metric name -> (function, which DB it reads, CSV column order)
 _SERIES: dict[str, tuple[Callable[..., list[dict[str, Any]]], str, list[str]]] = {
     "drift": (metrics.drift_pct_series, "teslog", ["date", "osrm_drift_pct", "haversine_drift_pct"]),
-    "distance": (metrics.distance_comparison_series, "teslog", ["date", "odometer_km", "osrm_km", "gps_km"]),
+    "distance": (metrics.distance_comparison_series, "teslog", ["date", "odometer_mi", "osrm_mi", "gps_mi"]),
     "energy-used": (metrics.energy_used_series, "tm", ["date", "kwh_used"]),
-    "energy-efficiency": (metrics.energy_efficiency_series, "tm", ["date", "wh_per_km"]),
+    "energy-efficiency": (metrics.energy_efficiency_series, "tm", ["date", "wh_per_mi"]),
     "charging-energy": (metrics.charging_energy_series, "tm", ["date", "kwh_added"]),
     "charging-cost": (metrics.charging_cost_series, "tm", ["date", "cost"]),
 }
@@ -86,11 +86,11 @@ _EXPORT_FIELDNAMES = [
     "date",
     "osrm_drift_pct",
     "haversine_drift_pct",
-    "odometer_km",
-    "osrm_km",
-    "gps_km",
+    "odometer_mi",
+    "osrm_mi",
+    "gps_mi",
     "kwh_used",
-    "wh_per_km",
+    "wh_per_mi",
     "kwh_added",
     "cost",
     "battery_health_pct",
