@@ -107,6 +107,11 @@
     }
   }
 
+  function cumulativeSum(values) {
+    let sum = 0;
+    return values.map((v) => (sum += v || 0));
+  }
+
   async function renderDistanceChart() {
     const rows = await fetchJSON("/api/metrics/distance");
     if (!rows || rows.length === 0) {
@@ -124,16 +129,16 @@
       data: {
         labels: rows.map((r) => formatLabel(r.date)),
         datasets: [
-          { label: "Odometer", data: rows.map((r) => r.odometer_mi), borderColor: palette.series1, backgroundColor: palette.series1, borderWidth: 2, pointRadius: 2, pointHoverRadius: 5, tension: 0.25 },
-          { label: "OSRM route", data: rows.map((r) => r.osrm_mi), borderColor: palette.series2, backgroundColor: palette.series2, borderWidth: 2, pointRadius: 2, pointHoverRadius: 5, tension: 0.25 },
-          { label: "GPS trace", data: rows.map((r) => r.gps_mi), borderColor: palette.series3, backgroundColor: palette.series3, borderWidth: 2, pointRadius: 2, pointHoverRadius: 5, tension: 0.25 },
+          { label: "Odometer", data: cumulativeSum(rows.map((r) => r.odometer_mi)), borderColor: palette.series1, backgroundColor: palette.series1, borderWidth: 2, pointRadius: 2, pointHoverRadius: 5, tension: 0.25 },
+          { label: "OSRM route", data: cumulativeSum(rows.map((r) => r.osrm_mi)), borderColor: palette.series2, backgroundColor: palette.series2, borderWidth: 2, pointRadius: 2, pointHoverRadius: 5, tension: 0.25 },
+          { label: "GPS trace", data: cumulativeSum(rows.map((r) => r.gps_mi)), borderColor: palette.series3, backgroundColor: palette.series3, borderWidth: 2, pointRadius: 2, pointHoverRadius: 5, tension: 0.25 },
         ],
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
         interaction: { mode: "index", intersect: false },
-        scales: baseScales({ title: { display: true, text: "mi", color: palette.textMuted, font: { size: 11 } } }),
+        scales: baseScales({ title: { display: true, text: "cumulative mi", color: palette.textMuted, font: { size: 11 } } }),
         plugins: { legend: { display: false }, tooltip: tooltipConfig() },
       },
     });
