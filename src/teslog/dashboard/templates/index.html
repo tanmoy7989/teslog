@@ -26,6 +26,25 @@
     <div class="sparkline-wrap"><canvas id="kpi-drift-spark"></canvas></div>
   </div>
 
+  <div class="stat-tile" id="kpi-cumulative-drift">
+    <div class="label">Cumulative Odometer Drift (measured from latest mileage)</div>
+    <div class="drift-kpi">
+      <div class="drift-kpi-row">
+        <span class="drift-dot" style="background: var(--series-2)"></span>
+        <span class="drift-kpi-name">OSRM</span>
+        <span class="value cum-drift-value-osrm">—</span>
+        <span class="delta cum-drift-delta-osrm"></span>
+      </div>
+      <div class="drift-kpi-row">
+        <span class="drift-dot" style="background: var(--series-3)"></span>
+        <span class="drift-kpi-name">GPS</span>
+        <span class="value cum-drift-value-gps">—</span>
+        <span class="delta cum-drift-delta-gps"></span>
+      </div>
+    </div>
+    <div class="sparkline-wrap"><canvas id="kpi-cumulative-drift-spark"></canvas></div>
+  </div>
+
   <div class="stat-tile" id="kpi-battery">
     <div class="label">Battery health</div>
     <div class="value-row">
@@ -61,7 +80,9 @@
           </div>
           <a class="csv-link" href="/api/metrics/distance.csv" download>Download CSV</a>
         </div>
-        <div id="legend-distance" class="chart-legend"></div>
+        <div id="legend-distance" class="chart-legend"
+             data-pre-tracking-mi="{{ pre_tracking_odometer_mi }}"
+             data-pre-tracking-date="{{ pre_tracking_odometer_date }}"></div>
         <div class="chart-canvas-wrap"><canvas id="chart-distance"></canvas></div>
       </div>
 

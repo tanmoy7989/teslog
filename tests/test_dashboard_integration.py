@@ -65,6 +65,31 @@ EXPECTED_WH_PER_MI = [326.2, 326.2, 320.5, 333.6, 332.0]
 EXPECTED_CHARGE_ENERGY = [25.40, 30.10, 18.75]
 EXPECTED_CHARGE_COST = [8.50, 10.20, None]
 
+# Progressive cumulative drift, computed the same way metrics.cumulative_drift_series does: at
+# each drive, (odometer_end − metrics.PRE_TRACKING_ODOMETER_KM) is "real distance driven since
+# tracking began", compared against the running OSRM/GPS total through that drive. Uses the real
+# PRE_TRACKING_ODOMETER_KM constant (not a fixture-specific one), so these numbers only make sense
+# alongside that constant — if it's ever changed, these need recomputing too.
+_ODOMETER_END_KM = [1012.0, 1025.5, 1040.0, 1051.0, 1065.0]
+_OSRM_KM = [11.5, 13.0, 13.9, 10.6, 13.4]
+_GPS_KM = [12.3, 13.8, 14.7, 11.2, 14.3]
+
+
+def _cumulative_drift(distances_km: list[float]) -> list[float]:
+    from teslog.metrics import PRE_TRACKING_ODOMETER_KM
+
+    cum = 0.0
+    out = []
+    for odo_end, d in zip(_ODOMETER_END_KM, distances_km, strict=True):
+        cum += d
+        driven_since_tracking = odo_end - PRE_TRACKING_ODOMETER_KM
+        out.append(round((driven_since_tracking - cum) / cum * 100, 2))
+    return out
+
+
+EXPECTED_CUM_OSRM_DRIFT_PCT = _cumulative_drift(_OSRM_KM)
+EXPECTED_CUM_GPS_DRIFT_PCT = _cumulative_drift(_GPS_KM)
+
 
 def _run_sql_file(conn: psycopg.Connection, path: pathlib.Path) -> None:
     with conn.cursor() as cur:
@@ -165,6 +190,10 @@ def test_dashboard_shows_seeded_data(live_app):
         assert [row["osrm_drift_pct"] for row in drift] == EXPECTED_OSRM_DRIFT_PCT
         assert [row["haversine_drift_pct"] for row in drift] == EXPECTED_HAVERSINE_DRIFT_PCT
 
+        cumulative_drift = client.get("/api/metrics/cumulative-drift").json()
+        assert [row["cum_osrm_drift_pct"] for row in cumulative_drift] == EXPECTED_CUM_OSRM_DRIFT_PCT
+        assert [row["cum_gps_drift_pct"] for row in cumulative_drift] == EXPECTED_CUM_GPS_DRIFT_PCT
+
         distance = client.get("/api/metrics/distance").json()
         assert len(distance) == 5
         assert [row["odometer_mi"] for row in distance] == EXPECTED_ODOMETER_MI
@@ -219,6 +248,25 @@ def test_dashboard_shows_seeded_data(live_app):
         assert haversine_drift_value == f"{statistics.mean(EXPECTED_HAVERSINE_DRIFT_PCT):.1f}%"
         haversine_drift_delta = page.locator("#kpi-drift .drift-delta-haversine").inner_text()
         assert haversine_drift_delta == f"±{statistics.stdev(EXPECTED_HAVERSINE_DRIFT_PCT):.1f}pp"
+
+        # Cumulative Odometer Drift tile — same mean +/- sample stdev contract, different series.
+        cum_osrm_value = page.locator("#kpi-cumulative-drift .cum-drift-value-osrm").inner_text()
+        assert cum_osrm_value == f"{statistics.mean(EXPECTED_CUM_OSRM_DRIFT_PCT):.1f}%"
+        cum_osrm_delta = page.locator("#kpi-cumulative-drift .cum-drift-delta-osrm").inner_text()
+        assert cum_osrm_delta == f"±{statistics.stdev(EXPECTED_CUM_OSRM_DRIFT_PCT):.1f}pp"
+
+        cum_gps_value = page.locator("#kpi-cumulative-drift .cum-drift-value-gps").inner_text()
+        assert cum_gps_value == f"{statistics.mean(EXPECTED_CUM_GPS_DRIFT_PCT):.1f}%"
+        cum_gps_delta = page.locator("#kpi-cumulative-drift .cum-drift-delta-gps").inner_text()
+        assert cum_gps_delta == f"±{statistics.stdev(EXPECTED_CUM_GPS_DRIFT_PCT):.1f}pp"
+
+        # The pre-tracking odometer annotation on the Distance comparison legend — server-rendered
+        # (Jinja) from metrics.PRE_TRACKING_ODOMETER_MI/_DATE, not fetched, so this checks the
+        # template wiring rather than any API response.
+        from teslog.metrics import PRE_TRACKING_ODOMETER_DATE, PRE_TRACKING_ODOMETER_MI
+
+        legend_text = page.locator("#legend-distance").inner_text()
+        assert f"Pre-tracking odometer: {PRE_TRACKING_ODOMETER_MI} mi ({PRE_TRACKING_ODOMETER_DATE})" in legend_text
 
         # Battery health has no live TeslaMateApi behind it — should show the
         # "unavailable" placeholder, not a crash or a stale chart.

@@ -118,10 +118,14 @@
       showEmpty("chart-distance", "No completed drives yet", "Charts fill in once TeslaMate records a drive.");
       return;
     }
+    const legendEl = document.getElementById("legend-distance");
+    const preTrackingMi = legendEl.dataset.preTrackingMi;
+    const preTrackingDate = legendEl.dataset.preTrackingDate;
     renderLegend("legend-distance", [
       { label: "Odometer", color: palette.series1 },
       { label: "OSRM route", color: palette.series2 },
       { label: "GPS trace", color: palette.series3 },
+      { label: `Pre-tracking odometer: ${preTrackingMi} mi (${preTrackingDate})`, color: palette.baseline },
     ]);
     const ctx = document.getElementById("chart-distance");
     new Chart(ctx, {
@@ -388,6 +392,23 @@
     );
   }
 
+  async function renderCumulativeDriftKpi() {
+    const rows = await fetchJSON("/api/metrics/cumulative-drift");
+    const tile = document.getElementById("kpi-cumulative-drift");
+    const fmtValue = (v) => `${v.toFixed(1)}%`;
+    const fmtDelta = (v) => `±${v.toFixed(1)}pp`;
+    setMeanStdevKpiValue(tile, ".cum-drift-value-osrm", ".cum-drift-delta-osrm", rows, "cum_osrm_drift_pct", fmtValue, fmtDelta);
+    setMeanStdevKpiValue(tile, ".cum-drift-value-gps", ".cum-drift-delta-gps", rows, "cum_gps_drift_pct", fmtValue, fmtDelta);
+    renderDualSparkline(
+      "kpi-cumulative-drift-spark",
+      (rows || []).slice(-12),
+      "cum_osrm_drift_pct",
+      palette.series2,
+      "cum_gps_drift_pct",
+      palette.series3
+    );
+  }
+
   async function renderEfficiencyKpi() {
     const rows = await fetchJSON("/api/metrics/energy-efficiency");
     const tile = document.getElementById("kpi-efficiency");
@@ -433,6 +454,7 @@
   document.getElementById("sync-btn").addEventListener("click", handleSync);
 
   renderDriftKpi();
+  renderCumulativeDriftKpi();
   renderEfficiencyKpi();
   renderBatteryHealthKpi();
 

@@ -29,6 +29,19 @@ def _mi(km: float | None) -> float | None:
     return round(km * _KM_TO_MI, 2) if km is not None else None
 
 
+# The odometer reading (km) as of the very first drive TeslaMate ever recorded for this car
+# (2026-08-02 01:33 — the actual start of tracking, not the car's purchase date of 2026-07-25;
+# TeslaMate wasn't set up until 8 days after delivery, so there's a real gap this doesn't cover).
+# Rendered as a plain annotation on the "Distance comparison" chart (see routes.py's dashboard()
+# handler) — deliberately never added into any *plotted* cumulative total, since Odometer would
+# then sit ~600mi above OSRM/GPS for the whole chart and crush the actually-interesting signal
+# (the slowly-growing gap between the three) into an unreadable sliver. It's also the anchor for
+# cumulative_drift_series() below, where it's subtracted back out rather than diluting anything.
+PRE_TRACKING_ODOMETER_KM = 1002.14
+PRE_TRACKING_ODOMETER_MI = _mi(PRE_TRACKING_ODOMETER_KM)
+PRE_TRACKING_ODOMETER_DATE = "Aug 2"
+
+
 # Front-and-back garage shuffles, three-point turns, driving lessons: real movement, but not a
 # "drive" worth tracking. Excluded wherever the smaller of OSRM route distance / odometer delta
 # is below this, so a short GPS blip doesn't get counted just because the odometer briefly moved.
@@ -99,6 +112,51 @@ def drift_pct_series(session: Session, car_id: int, limit: int = 200) -> list[di
                 "date": row.drive_start_at.isoformat(),
                 "osrm_drift_pct": osrm_drift,
                 "haversine_drift_pct": haversine_drift,
+            }
+        )
+    return result
+
+
+def cumulative_drift_series(session: Session, car_id: int) -> list[dict[str, Any]]:
+    """Progressive cumulative drift: at each drive, compares the *real* odometer reading at that
+    point against the running OSRM/GPS total for the tracked period alone — a different question
+    than drift_pct_series above. That one asks "on a typical trip, how much does my route choice
+    differ from OSRM/GPS' estimate" (each drive judged on its own, unweighted). This asks "as of
+    now, does my actual mileage since tracking began match what OSRM/GPS have been adding up" —
+    weighted by distance, and able to notice a drive TeslaMate silently never logged at all, which
+    drift_pct_series structurally can't (a drive it never sees can't skew an average of drives it
+    never sees).
+
+    Deliberately does NOT exclude short trips the way drift_pct_series does: PRE_TRACKING_ODOMETER_KM
+    and every drive's real odometer_end already include that mileage, so skipping short drives here
+    would inflate the gap with real distance that has no matching OSRM/GPS contribution to offset
+    it — a spurious "drift" that's really just the filter, not a measurement problem.
+    """
+    rows = session.execute(
+        select(
+            DriveRouteComparison.drive_start_at,
+            DriveRouteComparison.odometer_end,
+            DriveRouteComparison.osrm_route_distance,
+            DriveRouteComparison.gps_trace_distance,
+        )
+        .where(DriveRouteComparison.car_id == car_id)
+        .order_by(DriveRouteComparison.drive_start_at)
+    ).all()
+
+    result = []
+    cum_osrm_km = 0.0
+    cum_gps_km = 0.0
+    for row in rows:
+        cum_osrm_km += row.osrm_route_distance or 0.0
+        cum_gps_km += row.gps_trace_distance or 0.0
+        if row.odometer_end is None:
+            continue
+        driven_since_tracking_km = row.odometer_end - PRE_TRACKING_ODOMETER_KM
+        result.append(
+            {
+                "date": row.drive_start_at.isoformat(),
+                "cum_osrm_drift_pct": _drift_pct(driven_since_tracking_km, cum_osrm_km),
+                "cum_gps_drift_pct": _drift_pct(driven_since_tracking_km, cum_gps_km),
             }
         )
     return result

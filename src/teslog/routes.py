@@ -29,7 +29,11 @@ async def healthz() -> dict[str, str]:
 
 @router.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(request=request, name="index.html", context={})
+    context = {
+        "pre_tracking_odometer_mi": metrics.PRE_TRACKING_ODOMETER_MI,
+        "pre_tracking_odometer_date": metrics.PRE_TRACKING_ODOMETER_DATE,
+    }
+    return templates.TemplateResponse(request=request, name="index.html", context=context)
 
 
 @router.post("/api/sync")
@@ -40,6 +44,7 @@ async def trigger_sync() -> dict[str, int]:
 # metric name -> (function, which DB it reads, CSV column order)
 _SERIES: dict[str, tuple[Callable[..., list[dict[str, Any]]], str, list[str]]] = {
     "drift": (metrics.drift_pct_series, "teslog", ["date", "osrm_drift_pct", "haversine_drift_pct"]),
+    "cumulative-drift": (metrics.cumulative_drift_series, "teslog", ["date", "cum_osrm_drift_pct", "cum_gps_drift_pct"]),
     "distance": (metrics.distance_comparison_series, "teslog", ["date", "odometer_mi", "osrm_mi", "gps_mi"]),
     "energy-used": (metrics.energy_used_series, "tm", ["date", "kwh_used"]),
     "energy-efficiency": (metrics.energy_efficiency_series, "tm", ["date", "wh_per_mi"]),
