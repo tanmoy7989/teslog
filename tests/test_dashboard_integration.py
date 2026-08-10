@@ -58,8 +58,8 @@ EXPECTED_HAVERSINE_DRIFT_PCT = [-2.44, -2.17, -1.36, -1.79, -2.1]
 EXPECTED_ODOMETER_MI = [round(x * _KM_TO_MI, 2) for x in (12.0, 13.5, 14.5, 11.0, 14.0)]
 EXPECTED_KWH_USED = [2.43, 2.74, 2.89, 2.28, 2.89]
 # Computed from the same raw inputs as EXPECTED_KWH_USED (teslamate_seed.sql's per-drive
-# distance/rated-range and the car's 152.0 Wh/km efficiency), not by converting the already
-# *rounded* Wh/km figure — that loses precision right at the rounding boundary and can disagree
+# distance/rated-range and the car's 0.152 kWh/km efficiency), not by converting the already
+# *rounded* Wh/mi figure — that loses precision right at the rounding boundary and can disagree
 # with the app's actual (unrounded-until-the-end) computation by 0.1 at one or two indices.
 EXPECTED_WH_PER_MI = [326.2, 326.2, 320.5, 333.6, 332.0]
 EXPECTED_CHARGE_ENERGY = [25.40, 30.10, 18.75]

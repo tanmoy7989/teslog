@@ -151,14 +151,14 @@ def _energy_rows(session: Session, car_id: int, limit: int) -> list[Any]:
 
 
 def energy_used_series(session: Session, car_id: int, limit: int = 200) -> list[dict[str, Any]]:
-    """kWh used per drive, from rated-range consumed x the car's rated efficiency (Wh/km)."""
+    """kWh used per drive, from rated-range consumed x the car's rated efficiency (kWh/km)."""
     excluded = _excluded_short_trip_ids(car_id)
     result = []
     for row in reversed(_energy_rows(session, car_id, limit)):
         if row.id in excluded:
             continue
         range_used_km = float(row.start_rated_range_km) - float(row.end_rated_range_km)
-        kwh_used = max(0.0, range_used_km * row.efficiency / 1000)
+        kwh_used = max(0.0, range_used_km * row.efficiency)
         result.append({"date": row.start_date.isoformat(), "kwh_used": round(kwh_used, 2)})
     return result
 
@@ -171,7 +171,7 @@ def energy_efficiency_series(session: Session, car_id: int, limit: int = 200) ->
         if row.id in excluded:
             continue
         range_used_km = float(row.start_rated_range_km) - float(row.end_rated_range_km)
-        kwh_used = max(0.0, range_used_km * row.efficiency / 1000)
+        kwh_used = max(0.0, range_used_km * row.efficiency)
         wh_per_mi = (kwh_used * 1000) / (row.distance * _KM_TO_MI)
         result.append({"date": row.start_date.isoformat(), "wh_per_mi": round(wh_per_mi, 1)})
     return result
@@ -265,7 +265,7 @@ def _drive_energy_by_id(session: Session, car_id: int) -> dict[int, dict[str, An
         if row.id in excluded:
             continue
         range_used_km = float(row.start_rated_range_km) - float(row.end_rated_range_km)
-        kwh_used = max(0.0, range_used_km * row.efficiency / 1000)
+        kwh_used = max(0.0, range_used_km * row.efficiency)
         result[row.id] = {
             "date": row.start_date.isoformat(),
             "kwh_used": round(kwh_used, 2),

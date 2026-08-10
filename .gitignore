@@ -15,8 +15,9 @@ build/
 .mypy_cache/
 .ruff_cache/
 
-# Data volumes (bind mounts)
-data/
+# Data volumes (bind mounts) — anchored to the repo root: an unanchored "data/" also matches
+# tests/data/, which holds committed SQL fixtures, not a runtime volume.
+/data/
 
 # Downloaded tools (see scripts/get-tesla-tokens.sh)
 bin/
