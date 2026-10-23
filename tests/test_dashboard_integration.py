@@ -22,6 +22,7 @@ import pathlib
 import statistics
 import threading
 import time
+from datetime import UTC, datetime
 
 # Disable testcontainers' Ryuk cleanup-reaper container: on Docker Desktop for
 # Mac it fails to mount the docker socket (a known Docker Desktop issue, not
@@ -142,6 +143,10 @@ def live_app():
                 "TESLOG_HOST": TEST_HOST,
                 "TESLOG_PORT": str(TEST_PORT),
                 "TESLOG_RELOAD": "false",
+                # The fixtures are dated July 2026, older than the default 90-day chart window,
+                # so the browser half of the test starts on all history to see them at all.
+                # Windowing itself is checked against the API below.
+                "TESLOG_CHART_WINDOW_DAYS": "0",
             }
         )
         os.environ.pop("RCLONE_REMOTE", None)  # belt-and-suspenders: no Drive export possible
@@ -210,6 +215,28 @@ def test_dashboard_shows_seeded_data(live_app):
         charging_cost = client.get("/api/metrics/charging-cost").json()
         assert [row["cost"] for row in charging_cost] == EXPECTED_CHARGE_COST
 
+        # Chart window (?days=N): only rows from the last N days. `.days` rounds down, so the
+        # cutoff (now - N days) lands in [ref, ref + 1 day) — with ref one second after drive 102,
+        # that's after drive 102 and at or before drive 103 (except in the one second per day
+        # where it'd be just past it). Leaves drives 103-105 and charges 202-203.
+        days = (datetime.now(UTC) - datetime(2026, 7, 21, 8, 0, 1, tzinfo=UTC)).days
+        windowed_drift = client.get("/api/metrics/drift", params={"days": days}).json()
+        assert [row["haversine_drift_pct"] for row in windowed_drift] == EXPECTED_HAVERSINE_DRIFT_PCT[2:]
+        windowed_distance = client.get("/api/metrics/distance", params={"days": days}).json()
+        assert [row["odometer_mi"] for row in windowed_distance] == EXPECTED_ODOMETER_MI[2:]
+        windowed_efficiency = client.get("/api/metrics/energy-efficiency", params={"days": days}).json()
+        assert [row["wh_per_mi"] for row in windowed_efficiency] == EXPECTED_WH_PER_MI[2:]
+        windowed_charging = client.get("/api/metrics/charging-energy", params={"days": days}).json()
+        assert [row["kwh_added"] for row in windowed_charging] == EXPECTED_CHARGE_ENERGY[1:]
+        windowed_csv = client.get("/api/metrics/drift.csv", params={"days": days}).text
+        assert len(windowed_csv.strip().splitlines()) == 1 + 3  # header + drives 103-105
+
+        # Cumulative drift is anchored to the start of tracking, so it ignores the window.
+        windowed_cumulative = client.get("/api/metrics/cumulative-drift", params={"days": days}).json()
+        assert [row["cum_gps_drift_pct"] for row in windowed_cumulative] == EXPECTED_CUM_GPS_DRIFT_PCT
+
+        assert client.get("/api/metrics/drift", params={"days": 0}).status_code == 422
+
         # No TeslaMateApi running (deliberately unreachable URL above) — the
         # dashboard should degrade gracefully, not error.
         battery = client.get("/api/metrics/battery-health")
@@ -234,31 +261,25 @@ def test_dashboard_shows_seeded_data(live_app):
         assert page.locator(".empty-state", has_text="No energy data yet").count() == 0
         assert page.locator(".empty-state", has_text="No charging sessions yet").count() == 0
 
-        # The drift KPI tile shows both OSRM and Haversine drift as mean +/- sample stdev
-        # across every seeded drive, not the latest drive's value. Hand-computed from
-        # EXPECTED_OSRM_DRIFT_PCT / EXPECTED_HAVERSINE_DRIFT_PCT with Python's statistics
-        # module (sample stdev, ddof=1 — same as dashboard.js's implementation). Tile
-        # intentionally displays 1 decimal place (dashboard.js toFixed(1)).
-        osrm_drift_value = page.locator("#kpi-drift .drift-value-osrm").inner_text()
-        assert osrm_drift_value == f"{statistics.mean(EXPECTED_OSRM_DRIFT_PCT):.1f}%"
-        osrm_drift_delta = page.locator("#kpi-drift .drift-delta-osrm").inner_text()
-        assert osrm_drift_delta == f"±{statistics.stdev(EXPECTED_OSRM_DRIFT_PCT):.1f}pp"
-
-        haversine_drift_value = page.locator("#kpi-drift .drift-value-haversine").inner_text()
+        # The drift KPI tile shows GPS (haversine) drift as mean +/- sample stdev across every
+        # seeded drive, not the latest drive's value. Hand-computed from
+        # EXPECTED_HAVERSINE_DRIFT_PCT with Python's statistics module (sample stdev, ddof=1 —
+        # same as dashboard.js's implementation). Tile intentionally displays 1 decimal place
+        # (dashboard.js toFixed(1)).
+        haversine_drift_value = page.locator("#kpi-drift .value").inner_text()
         assert haversine_drift_value == f"{statistics.mean(EXPECTED_HAVERSINE_DRIFT_PCT):.1f}%"
-        haversine_drift_delta = page.locator("#kpi-drift .drift-delta-haversine").inner_text()
+        haversine_drift_delta = page.locator("#kpi-drift .delta").inner_text()
         assert haversine_drift_delta == f"±{statistics.stdev(EXPECTED_HAVERSINE_DRIFT_PCT):.1f}pp"
 
         # Cumulative Odometer Drift tile — same mean +/- sample stdev contract, different series.
-        cum_osrm_value = page.locator("#kpi-cumulative-drift .cum-drift-value-osrm").inner_text()
-        assert cum_osrm_value == f"{statistics.mean(EXPECTED_CUM_OSRM_DRIFT_PCT):.1f}%"
-        cum_osrm_delta = page.locator("#kpi-cumulative-drift .cum-drift-delta-osrm").inner_text()
-        assert cum_osrm_delta == f"±{statistics.stdev(EXPECTED_CUM_OSRM_DRIFT_PCT):.1f}pp"
-
-        cum_gps_value = page.locator("#kpi-cumulative-drift .cum-drift-value-gps").inner_text()
+        cum_gps_value = page.locator("#kpi-cumulative-drift .value").inner_text()
         assert cum_gps_value == f"{statistics.mean(EXPECTED_CUM_GPS_DRIFT_PCT):.1f}%"
-        cum_gps_delta = page.locator("#kpi-cumulative-drift .cum-drift-delta-gps").inner_text()
+        cum_gps_delta = page.locator("#kpi-cumulative-drift .delta").inner_text()
         assert cum_gps_delta == f"±{statistics.stdev(EXPECTED_CUM_GPS_DRIFT_PCT):.1f}pp"
+
+        # OSRM is still computed and exported (asserted via the API above), but never shown
+        # anywhere on the dashboard itself.
+        assert "OSRM" not in page.locator("main").inner_text()
 
         # The pre-tracking odometer annotation on the Distance comparison legend — server-rendered
         # (Jinja) from metrics.PRE_TRACKING_ODOMETER_MI/_DATE, not fetched, so this checks the
@@ -267,6 +288,31 @@ def test_dashboard_shows_seeded_data(live_app):
 
         legend_text = page.locator("#legend-distance").inner_text()
         assert f"Pre-tracking odometer: {PRE_TRACKING_ODOMETER_MI} mi ({PRE_TRACKING_ODOMETER_DATE})" in legend_text
+
+        # Chart window slider: started on "All history" (TESLOG_CHART_WINDOW_DAYS=0 above), with
+        # the windowed tiles tagged to match and the cumulative tile always on all history.
+        assert page.locator("#window-name").inner_text() == "All history"
+        assert page.locator("#kpi-drift .window-chip").inner_text() == "all history"
+        assert page.locator("#kpi-cumulative-drift .window-chip").inner_text() == "all history"
+        assert "5 drives · 3 charges" in page.locator("#window-summary").inner_text()
+
+        # Sliding to 30 days refetches every windowed chart: nothing that recent in the fixtures,
+        # so the charts switch to the window-aware empty state, while the cumulative tile — all
+        # history regardless — keeps its value.
+        page.locator("#window-slider").fill("0")
+        page.wait_for_function("document.getElementById('window-summary').textContent.includes('0 drives')")
+        assert page.locator("#window-name").inner_text() == "30 days"
+        assert page.locator("#kpi-drift .window-chip").inner_text() == "last 30 days"
+        assert page.locator("#kpi-drift .value").inner_text() == "—"
+        assert page.locator(".empty-state", has_text="No drives in the last 30 days").count() == 2
+        assert cum_gps_value == page.locator("#kpi-cumulative-drift .value").inner_text()
+        assert page.locator("a.csv-link").first.get_attribute("href").endswith("?days=30")
+
+        # And back to all history: the charts come back from their empty states.
+        page.locator("#window-slider").fill("3")
+        page.wait_for_function("document.getElementById('window-summary').textContent.includes('5 drives')")
+        assert page.locator(".empty-state").count() == 0
+        assert page.locator("#kpi-drift .value").inner_text() == haversine_drift_value
 
         # Battery health has no live TeslaMateApi behind it — should show the
         # "unavailable" placeholder, not a crash or a stale chart.

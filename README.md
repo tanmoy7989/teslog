@@ -1,9 +1,9 @@
 # Teslog
 
 Stats dashboard for [TeslaMate](https://github.com/teslamate-org/teslamate): for each completed
-drive, compares an OSRM-routed driving distance and the GPS trace distance against the car's
-actual odometer delta, and surfaces the drift between them as two separate metrics — **OSRMDrift**
-and **GPSDrift** (see [How it works](#how-it-works)).
+drive, compares the GPS trace distance against the car's actual odometer delta and surfaces the
+drift between them as **GPSDrift**, alongside energy, efficiency, and charging stats (see
+[How it works](#how-it-works)).
 
 Runs on macOS and Linux, including a Raspberry Pi. No MQTT, no Grafana — Teslog is its own
 dashboard and doesn't need live status. Real-time nav-drift tracking (MQTT-based) is planned next —
@@ -16,8 +16,9 @@ see [docs/phase-2-nav-odometer-drift.md](docs/phase-2-nav-odometer-drift.md).
 - `teslamateapi` — REST API in front of TeslaMate's data
 - `teslog` — this app: background sync + web dashboard
 
-Routing distances come from [OSRM](https://project-osrm.org/)'s public demo server by default — no
-signup or API key needed. No third-party account required anywhere except your own Tesla account.
+Each drive also gets an [OSRM](https://project-osrm.org/)-routed distance (public demo server by
+default — no signup or API key needed); it's computed and exported but not plotted. No third-party
+account required anywhere except your own Tesla account.
 
 ## Usage
 
@@ -34,8 +35,8 @@ the other.
 ssh user@pi-host 'cd ~/teslog && ./teslog.sh up'     # start serving, on the Pi
 ./teslog.sh down                                     # stop it (on whichever machine is running it)
 
-# optional, on 'up': how often (hours) and where Teslog exports its stats to Google Drive
-ssh user@pi-host 'cd ~/teslog && ./teslog.sh up --export-hours 12 --export-location backups'
+# optional, on 'up': how often (daily|weekly) and where Teslog exports its stats to Google Drive
+ssh user@pi-host 'cd ~/teslog && ./teslog.sh up --export-schedule daily --export-location backups'
 ```
 
 `~/teslog` is the default destination `migrate-to-pi.sh` copies into on the Pi — configurable via
@@ -85,7 +86,7 @@ untouched. (Re-running the full `setup` → `migrate-to-pi.sh` flow instead woul
 ## Backing up to Google Drive
 
 `./teslog.sh up` installs a cron job (removed by `down`, reinstalled by the next `up`) that
-periodically exports Teslog's full stats history — every drive's route comparison and energy
+exports Teslog's full stats history — every drive's route comparison and energy
 numbers, every charging session, and a battery-health snapshot — as one CSV, and uploads it via
 [`rclone`](https://rclone.org/) to `gdrive:<location>/teslog_<YY-MM-DD_HH:MM>.csv`. One-time setup,
 on whichever machine runs `up` (e.g. the Pi):
@@ -95,14 +96,18 @@ curl https://rclone.org/install.sh | sudo bash
 rclone config   # add a remote named exactly "gdrive" pointing at your Google Drive
 ```
 
-Frequency (hours) and destination folder default to 24 and `teslog`, set into `.env` by `setup`.
-Override either via `up`'s `--export-hours`/`--export-location` flags — whatever you pass is
-persisted into `.env`, so a later plain `up` (e.g. after a `down`) remembers it rather than
-reverting to the defaults. If the `gdrive` remote isn't configured yet, each export run just logs
+Schedule and destination folder default to `weekly` (Sundays at 03:00, the machine's local time)
+and `teslog`, set into `.env` by `setup`. Override either via `up`'s
+`--export-schedule daily|weekly`/`--export-location` flags — whatever you pass is persisted into
+`.env`, so a later plain `up` (e.g. after a `down`) remembers it rather than reverting to the
+defaults. Each export is a full-history snapshot, so a less frequent schedule only means a less
+fresh backup, never missing rows. (`update` doesn't touch the cron job — after changing the
+schedule, or pulling in a change to how it's installed, run `up` once more; it replaces the cron
+line in place, and no `down` is needed.) If the `gdrive` remote isn't configured yet, each export run just logs
 that it's skipping itself (see `drive-export.log` in the repo) instead of failing loudly — `up`
 still starts the server regardless.
 
-The CSV has one row per drive (`type=drive`: OSRMDrift %, GPSDrift %, odometer/OSRM/GPS
+The CSV has one row per drive (`type=drive`: OSRM drift %, GPS drift %, odometer/OSRM/GPS
 distances in miles, energy used, Wh/mi), one row per charging session (`type=charge`: kWh added,
 cost — a separate kind of event from a drive, with its own timestamps), and one `type=battery` row
 per export run with the current battery health %. Most columns are blank on rows they don't apply
@@ -124,6 +129,7 @@ See [config/.env.example](config/.env.example) for all variables. Notable ones:
 | `TESLOG_CAR_ID` | Which TeslaMate car ID to track |
 | `OSRM_BASE_URL` | OSRM routing server (public demo by default) |
 | `TESLOG_SYNC_INTERVAL_SECONDS` | How often to check for new drives (default 900) |
+| `TESLOG_CHART_WINDOW_DAYS` | Dashboard's starting chart window: 30, 90 (default), 365, or 0 for all history |
 
 No login on the dashboard itself — it's built for LAN-only use. For access away from home, put it
 on a private network you control (e.g. [Tailscale](https://tailscale.com/)) rather than exposing it
@@ -145,32 +151,41 @@ regardless of which unit they're in.
 The dashboard is laid out in two columns: **Distance** (left) and **Energy** (right), each three
 charts stacked vertically, under a shared KPI row.
 
-Distance has three charts, all sharing the same colors for OSRM route (orange) and GPS trace
-(green): the existing odometer/OSRM/GPS-vs-time line chart; a new scatter of each drive's OSRM/GPS
-distance plotted against its odometer reading, with a dashed reference line marking where a point
-would land if the traced distance matched the odometer exactly; and the two drift metrics below,
-plotted together on one chart because they measure different things:
+A **window slider** in the header (30 days · 90 days · 1 year · All history) sets how far back
+the charts go, so they don't grow forever as data piles up. It's a rolling window ending today,
+applied server-side (`?days=N` on every `/api/metrics/*` endpoint, CSV downloads included), and
+each browser remembers its own position; `TESLOG_CHART_WINDOW_DAYS` (default 90) is only where a
+browser starts the first time. Every chart and the per-drive KPI tiles follow the window, each
+tagged with it. The cumulative distance chart restarts from 0 at the window's start — carrying the
+all-history total in would just lift both lines by the same constant. The exceptions are
+**Cumulative odometer drift**, which is anchored to the start of tracking and so always covers
+all history, and the Drive export, which is always a full-history snapshot.
 
-- **OSRMDrift** — `(odometer_delta - osrm_route_distance) / osrm_route_distance * 100`. OSRM is
-  given only the drive's start/end points and asked for the shortest route between them per
-  OpenStreetMap's road network — it has no idea what path you actually took. So this tracks how
-  much your actual route diverged from the "optimal" one, not GPS/odometer error.
-- **GPSDrift** (`haversine_drift_pct` in the API/CSV — computed via the haversine formula, kept
-  as-is there since it's an established field name) — `(odometer_delta - gps_trace_distance) /
-  gps_trace_distance * 100`, where `gps_trace_distance` is the sum of the straight-line distance
-  between every consecutive GPS point TeslaMate recorded along the drive. Since this traces the
-  path you actually drove (same as the odometer), it should stay close to zero — a persistent
-  nonzero GPSDrift would point at real odometer or GPS inaccuracy, rather than just route choice.
+Distance has three charts, with the GPS trace in green throughout: cumulative odometer vs. GPS
+trace distance over time; a scatter of each drive's GPS distance plotted against its odometer
+reading, with a dashed reference line marking where a point would land if the two matched
+exactly; and **GPSDrift** per drive.
+
+**GPSDrift** (`haversine_drift_pct` in the API/CSV — computed via the haversine formula, kept as-is
+there since it's an established field name) is `(odometer_delta - gps_trace_distance) /
+gps_trace_distance * 100`, where `gps_trace_distance` is the sum of the straight-line distance
+between every consecutive GPS point TeslaMate recorded along the drive. Since this traces the path
+you actually drove (same as the odometer), it should stay close to zero — a persistent nonzero
+GPSDrift points at real odometer or GPS inaccuracy.
+
+The sync loop also asks OSRM for the routed distance between each drive's start and end points,
+and the drift against it (`osrm_drift_pct`). These aren't shown on the dashboard, but they stay in
+the API, the per-chart CSV downloads, and the Drive export.
 
 Energy has three charts: energy used and efficiency per drive, and charging energy added per
 session. (Charging cost isn't shown here — see the note in
 [Backing up to Google Drive](#backing-up-to-google-drive) — since it's only meaningful if
 TeslaMate has electricity pricing configured, which isn't everyone's setup.)
 
-Two of the KPI tiles — **Odometer drift** and **Efficiency** — show each metric's **mean and
-sample standard deviation across every drive synced so far** (not a fixed trailing window, and not
-just the latest drive): read the big number as "typical," and the `±` delta as how consistent
-that's been, not a change-vs-previous-drive indicator. **Battery health** is TeslaMateApi's own
+The **Odometer drift** and **Efficiency** KPI tiles show each metric's **mean and sample standard
+deviation across every drive in the chart window** (not just the latest drive), and
+**Cumulative odometer drift** the same across all history: read the big number as "typical," and
+the `±` delta as how consistent that's been, not a change-vs-previous-drive indicator. **Battery health** is TeslaMateApi's own
 reported figure, passed through unchanged — it can occasionally read slightly over 100% (Tesla's
 own range-estimate calibration noise), which is expected and not a Teslog calculation issue.
 

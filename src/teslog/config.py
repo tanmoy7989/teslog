@@ -40,6 +40,7 @@ class Settings:
     tm_tz: str
     teslog_reload: bool
     teslog_sync_interval_seconds: int
+    teslog_chart_window_days: int
 
     @property
     def tm_db_url(self) -> str:
@@ -77,4 +78,5 @@ def get_settings() -> Settings:
         tm_tz=_env("TM_TZ", "America/Los_Angeles"),
         teslog_reload=_env_bool("TESLOG_RELOAD"),
         teslog_sync_interval_seconds=_env_int("TESLOG_SYNC_INTERVAL_SECONDS", 900),
+        teslog_chart_window_days=_env_int("TESLOG_CHART_WINDOW_DAYS", 90),
     )

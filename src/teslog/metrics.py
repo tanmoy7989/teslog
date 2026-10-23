@@ -61,6 +61,18 @@ def _not_short_trip():
     )
 
 
+def _since(query, since: datetime | None):
+    """Restrict a drive_route_comparisons query to drives starting at/after `since` (None = all)."""
+    return query if since is None else query.where(DriveRouteComparison.drive_start_at >= since)
+
+
+def _tm_since(since: datetime | None) -> datetime | None:
+    """`since` as a naive UTC datetime, for TeslaMate's own tables: TeslaMate stores UTC in
+    `timestamp without time zone` columns, so comparing against a tz-aware value would make
+    Postgres cast through the session's TimeZone setting instead of comparing UTC to UTC."""
+    return since.astimezone(UTC).replace(tzinfo=None) if since is not None else None
+
+
 def _excluded_short_trip_ids(car_id: int) -> set[int]:
     """Drive ids `_not_short_trip` would filter out — for cross-referencing against TeslaMate's
     own `drives` table, which has no OSRM distance of its own to filter by directly."""
@@ -81,7 +93,7 @@ def _drift_pct(odometer_delta: float | None, baseline_distance: float | None) ->
     return round((odometer_delta - baseline_distance) / baseline_distance * 100, 2)
 
 
-def drift_pct_series(session: Session, car_id: int, limit: int = 200) -> list[dict[str, Any]]:
+def drift_pct_series(session: Session, car_id: int, since: datetime | None = None) -> list[dict[str, Any]]:
     """Odometer drift % against two different baselines, per drive:
 
     OSRMDrift — vs. OSRM's routed distance between the drive's start/end points (what the road
@@ -90,7 +102,7 @@ def drift_pct_series(session: Session, car_id: int, limit: int = 200) -> list[di
     recorded point along the path actually driven) — should track the odometer closely, since
     both describe the same real path.
     """
-    rows = session.execute(
+    query = (
         select(
             DriveRouteComparison.drive_start_at,
             DriveRouteComparison.odometer_delta,
@@ -99,8 +111,8 @@ def drift_pct_series(session: Session, car_id: int, limit: int = 200) -> list[di
         )
         .where(DriveRouteComparison.car_id == car_id, _not_short_trip())
         .order_by(DriveRouteComparison.drive_start_at)
-        .limit(limit)
-    ).all()
+    )
+    rows = session.execute(_since(query, since)).all()
     result = []
     for row in rows:
         osrm_drift = _drift_pct(row.odometer_delta, row.osrm_route_distance)
@@ -131,6 +143,9 @@ def cumulative_drift_series(session: Session, car_id: int) -> list[dict[str, Any
     and every drive's real odometer_end already include that mileage, so skipping short drives here
     would inflate the gap with real distance that has no matching OSRM/GPS contribution to offset
     it — a spurious "drift" that's really just the filter, not a measurement problem.
+
+    For the same reason it takes no chart window: it's anchored to the start of tracking, so it
+    always covers all history, whatever window the rest of the dashboard is showing.
     """
     rows = session.execute(
         select(
@@ -162,9 +177,11 @@ def cumulative_drift_series(session: Session, car_id: int) -> list[dict[str, Any
     return result
 
 
-def distance_comparison_series(session: Session, car_id: int, limit: int = 200) -> list[dict[str, Any]]:
+def distance_comparison_series(
+    session: Session, car_id: int, since: datetime | None = None
+) -> list[dict[str, Any]]:
     """Odometer delta vs OSRM route distance vs GPS trace distance, per drive (in miles)."""
-    rows = session.execute(
+    query = (
         select(
             DriveRouteComparison.drive_start_at,
             DriveRouteComparison.odometer_delta,
@@ -173,8 +190,8 @@ def distance_comparison_series(session: Session, car_id: int, limit: int = 200) 
         )
         .where(DriveRouteComparison.car_id == car_id, _not_short_trip())
         .order_by(DriveRouteComparison.drive_start_at)
-        .limit(limit)
-    ).all()
+    )
+    rows = session.execute(_since(query, since)).all()
     return [
         {
             "date": row.drive_start_at.isoformat(),
@@ -189,10 +206,11 @@ def distance_comparison_series(session: Session, car_id: int, limit: int = 200) 
 # --- Energy (TeslaMate DB) ----------------------------------------------------
 
 
-def _energy_rows(session: Session, car_id: int, limit: int) -> list[Any]:
+def _energy_rows(session: Session, car_id: int, since: datetime | None = None) -> list[Any]:
+    since_clause = "AND d.start_date >= :since" if since is not None else ""
     return session.execute(
         text(
-            """
+            f"""
             SELECT d.id, d.start_date, d.distance, d.start_rated_range_km, d.end_rated_range_km,
                    c.efficiency
             FROM drives d
@@ -200,19 +218,19 @@ def _energy_rows(session: Session, car_id: int, limit: int) -> list[Any]:
             WHERE d.car_id = :car_id AND d.end_date IS NOT NULL
               AND d.start_rated_range_km IS NOT NULL AND d.end_rated_range_km IS NOT NULL
               AND c.efficiency IS NOT NULL AND d.distance IS NOT NULL AND d.distance > 0
-            ORDER BY d.start_date DESC
-            LIMIT :limit
+              {since_clause}
+            ORDER BY d.start_date
             """
         ),
-        {"car_id": car_id, "limit": limit},
+        {"car_id": car_id, "since": _tm_since(since)},
     ).all()
 
 
-def energy_used_series(session: Session, car_id: int, limit: int = 200) -> list[dict[str, Any]]:
+def energy_used_series(session: Session, car_id: int, since: datetime | None = None) -> list[dict[str, Any]]:
     """kWh used per drive, from rated-range consumed x the car's rated efficiency (kWh/km)."""
     excluded = _excluded_short_trip_ids(car_id)
     result = []
-    for row in reversed(_energy_rows(session, car_id, limit)):
+    for row in _energy_rows(session, car_id, since):
         if row.id in excluded:
             continue
         range_used_km = float(row.start_rated_range_km) - float(row.end_rated_range_km)
@@ -221,11 +239,13 @@ def energy_used_series(session: Session, car_id: int, limit: int = 200) -> list[
     return result
 
 
-def energy_efficiency_series(session: Session, car_id: int, limit: int = 200) -> list[dict[str, Any]]:
+def energy_efficiency_series(
+    session: Session, car_id: int, since: datetime | None = None
+) -> list[dict[str, Any]]:
     """Actual Wh/mi for each drive (vs. the car's nominal rated efficiency)."""
     excluded = _excluded_short_trip_ids(car_id)
     result = []
-    for row in reversed(_energy_rows(session, car_id, limit)):
+    for row in _energy_rows(session, car_id, since):
         if row.id in excluded:
             continue
         range_used_km = float(row.start_rated_range_km) - float(row.end_rated_range_km)
@@ -238,37 +258,38 @@ def energy_efficiency_series(session: Session, car_id: int, limit: int = 200) ->
 # --- Charging (TeslaMate DB) --------------------------------------------------
 
 
-def _charging_rows(session: Session, car_id: int, limit: int) -> list[Any]:
+def _charging_rows(session: Session, car_id: int, since: datetime | None = None) -> list[Any]:
+    since_clause = "AND start_date >= :since" if since is not None else ""
     return session.execute(
         text(
-            """
+            f"""
             SELECT start_date, charge_energy_added, cost
             FROM charging_processes
             WHERE car_id = :car_id AND end_date IS NOT NULL
-            ORDER BY start_date DESC
-            LIMIT :limit
+              {since_clause}
+            ORDER BY start_date
             """
         ),
-        {"car_id": car_id, "limit": limit},
+        {"car_id": car_id, "since": _tm_since(since)},
     ).all()
 
 
-def charging_energy_series(session: Session, car_id: int, limit: int = 200) -> list[dict[str, Any]]:
+def charging_energy_series(session: Session, car_id: int, since: datetime | None = None) -> list[dict[str, Any]]:
     """kWh added per charging session."""
     return [
         {
             "date": row.start_date.isoformat(),
             "kwh_added": float(row.charge_energy_added) if row.charge_energy_added is not None else None,
         }
-        for row in reversed(_charging_rows(session, car_id, limit))
+        for row in _charging_rows(session, car_id, since)
     ]
 
 
-def charging_cost_series(session: Session, car_id: int, limit: int = 200) -> list[dict[str, Any]]:
+def charging_cost_series(session: Session, car_id: int, since: datetime | None = None) -> list[dict[str, Any]]:
     """Cost per charging session, where TeslaMate has pricing configured to track it."""
     return [
         {"date": row.start_date.isoformat(), "cost": float(row.cost) if row.cost is not None else None}
-        for row in reversed(_charging_rows(session, car_id, limit))
+        for row in _charging_rows(session, car_id, since)
     ]
 
 
@@ -289,9 +310,6 @@ async def battery_health(client: TeslaMateApiClient) -> dict[str, Any] | None:
 
 
 # --- Full export (all history, combined) --------------------------------------
-
-_EXPORT_LIMIT = 1_000_000  # a full-history export, not a chart window — effectively unbounded
-
 
 def _drive_comparisons_by_id(session: Session, car_id: int) -> dict[int, dict[str, Any]]:
     rows = session.execute(
@@ -319,7 +337,7 @@ def _drive_comparisons_by_id(session: Session, car_id: int) -> dict[int, dict[st
 def _drive_energy_by_id(session: Session, car_id: int) -> dict[int, dict[str, Any]]:
     excluded = _excluded_short_trip_ids(car_id)
     result: dict[int, dict[str, Any]] = {}
-    for row in _energy_rows(session, car_id, limit=_EXPORT_LIMIT):
+    for row in _energy_rows(session, car_id):
         if row.id in excluded:
             continue
         range_used_km = float(row.start_rated_range_km) - float(row.end_rated_range_km)
@@ -356,7 +374,7 @@ def charge_export_rows(session: Session, car_id: int) -> list[dict[str, Any]]:
             "kwh_added": float(row.charge_energy_added) if row.charge_energy_added is not None else None,
             "cost": float(row.cost) if row.cost is not None else None,
         }
-        for row in _charging_rows(session, car_id, limit=_EXPORT_LIMIT)
+        for row in _charging_rows(session, car_id)
     ]
 
 

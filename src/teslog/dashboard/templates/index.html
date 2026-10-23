@@ -2,45 +2,41 @@
 {% block title %}Teslog{% endblock %}
 
 {% block header_extra %}
-<button id="sync-btn" type="button">Sync now</button>
+<div class="header-controls">
+  <div class="window-control" data-default-days="{{ default_window_days }}">
+    <label for="window-slider" class="window-label">Window <strong id="window-name">90 days</strong></label>
+    <div class="window-track">
+      <input id="window-slider" type="range" min="0" max="3" step="1" value="1" aria-valuetext="90 days">
+      <div class="window-stops" aria-hidden="true">
+        <span class="window-stop" style="left: 0%">30d</span>
+        <span class="window-stop" style="left: 33.333%">90d</span>
+        <span class="window-stop" style="left: 66.667%">1y</span>
+        <span class="window-stop" style="left: 100%">All</span>
+      </div>
+    </div>
+  </div>
+  <button id="sync-btn" type="button">Sync now</button>
+</div>
 {% endblock %}
 
 {% block content %}
+<div id="window-summary" class="window-summary">&nbsp;</div>
+
 <section class="kpi-row">
   <div class="stat-tile" id="kpi-drift">
-    <div class="label">Odometer drift</div>
-    <div class="drift-kpi">
-      <div class="drift-kpi-row">
-        <span class="drift-dot" style="background: var(--series-2)"></span>
-        <span class="drift-kpi-name">OSRM</span>
-        <span class="value drift-value-osrm">—</span>
-        <span class="delta drift-delta-osrm"></span>
-      </div>
-      <div class="drift-kpi-row">
-        <span class="drift-dot" style="background: var(--series-3)"></span>
-        <span class="drift-kpi-name">GPS</span>
-        <span class="value drift-value-haversine">—</span>
-        <span class="delta drift-delta-haversine"></span>
-      </div>
+    <div class="label">Odometer drift vs. GPS <span class="window-chip"></span></div>
+    <div class="value-row">
+      <span class="value">—</span>
+      <span class="delta"></span>
     </div>
     <div class="sparkline-wrap"><canvas id="kpi-drift-spark"></canvas></div>
   </div>
 
   <div class="stat-tile" id="kpi-cumulative-drift">
-    <div class="label">Cumulative Odometer Drift (measured from latest mileage)</div>
-    <div class="drift-kpi">
-      <div class="drift-kpi-row">
-        <span class="drift-dot" style="background: var(--series-2)"></span>
-        <span class="drift-kpi-name">OSRM</span>
-        <span class="value cum-drift-value-osrm">—</span>
-        <span class="delta cum-drift-delta-osrm"></span>
-      </div>
-      <div class="drift-kpi-row">
-        <span class="drift-dot" style="background: var(--series-3)"></span>
-        <span class="drift-kpi-name">GPS</span>
-        <span class="value cum-drift-value-gps">—</span>
-        <span class="delta cum-drift-delta-gps"></span>
-      </div>
+    <div class="label">Cumulative Odometer Drift vs. GPS (measured from latest mileage) <span class="window-chip all">all history</span></div>
+    <div class="value-row">
+      <span class="value">—</span>
+      <span class="delta"></span>
     </div>
     <div class="sparkline-wrap"><canvas id="kpi-cumulative-drift-spark"></canvas></div>
   </div>
@@ -57,7 +53,7 @@
   </div>
 
   <div class="stat-tile" id="kpi-efficiency">
-    <div class="label">Efficiency (Wh/mi)</div>
+    <div class="label">Efficiency (Wh/mi) <span class="window-chip"></span></div>
     <div class="value-row">
       <span class="value">—</span>
       <span class="delta"></span>
@@ -76,7 +72,7 @@
         <div class="chart-head">
           <div>
             <h2>Distance comparison</h2>
-            <div class="chart-desc">Cumulative odometer vs. OSRM route vs. GPS trace, running total across drives</div>
+            <div class="chart-desc" id="distance-desc">Cumulative odometer vs. GPS trace, running total across drives</div>
           </div>
           <a class="csv-link" href="/api/metrics/distance.csv" download>Download CSV</a>
         </div>
@@ -90,7 +86,7 @@
         <div class="chart-head">
           <div>
             <h2>Odometer vs. traced distance</h2>
-            <div class="chart-desc">Each drive's OSRM route / GPS trace distance, plotted against its odometer reading</div>
+            <div class="chart-desc">Each drive's GPS trace distance, plotted against its odometer reading</div>
           </div>
           <a class="csv-link" href="/api/metrics/distance.csv" download>Download CSV</a>
         </div>
@@ -102,7 +98,7 @@
         <div class="chart-head">
           <div>
             <h2>Odometer drift %</h2>
-            <div class="chart-desc">OSRMDrift: vs. OSRM's routed distance. GPSDrift: vs. the GPS trace.</div>
+            <div class="chart-desc">Per-drive odometer drift vs. the GPS trace</div>
           </div>
           <a class="csv-link" href="/api/metrics/drift.csv" download>Download CSV</a>
         </div>

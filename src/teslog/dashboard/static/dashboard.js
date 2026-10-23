@@ -20,6 +20,16 @@
     statusCritical: color("--status-critical"),
   };
 
+  // Chart window slider stops, in slider order. `days: null` = all history (no ?days= sent).
+  const WINDOWS = [
+    { days: 30, name: "30 days", chip: "last 30 days" },
+    { days: 90, name: "90 days", chip: "last 90 days" },
+    { days: 365, name: "1 year", chip: "last year" },
+    { days: null, name: "All history", chip: "all history" },
+  ];
+  const DEFAULT_WINDOW_INDEX = 1;
+  const WINDOW_STORAGE_KEY = "teslog.chartWindow";
+
   function withAlpha(hex, alpha) {
     const h = hex.replace("#", "");
     const r = parseInt(h.substring(0, 2), 16);
@@ -31,6 +41,10 @@
   function formatLabel(iso) {
     const d = new Date(iso);
     return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
+
+  function formatLongDate(date) {
+    return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
   }
 
   async function fetchJSON(url) {
@@ -73,10 +87,24 @@
     };
   }
 
+  // Charts are redrawn every time the window changes, so a canvas may already hold a chart (to
+  // destroy first) or be hidden behind an empty state from the previous window (to bring back).
+  function mountChart(canvasId, config) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    const wrap = canvas.closest(".chart-canvas-wrap") || canvas.parentElement;
+    wrap.querySelector(".empty-state")?.remove();
+    canvas.style.display = "";
+    Chart.getChart(canvas)?.destroy();
+    new Chart(canvas, config);
+  }
+
   function showEmpty(canvasId, title, hint) {
     const canvas = document.getElementById(canvasId);
     const wrap = canvas.closest(".chart-canvas-wrap") || canvas.parentElement;
-    canvas.remove();
+    Chart.getChart(canvas)?.destroy();
+    canvas.style.display = "none";
+    wrap.querySelector(".empty-state")?.remove();
     const div = document.createElement("div");
     div.className = "empty-state";
     const titleEl = document.createElement("div");
@@ -87,6 +115,13 @@
     div.appendChild(titleEl);
     div.appendChild(hintEl);
     wrap.appendChild(div);
+  }
+
+  // Empty-state copy for a windowed chart: "nothing yet" only makes sense on all history — in a
+  // shorter window the data may well exist, just further back.
+  function emptyText(win, noun, allTitle, allHint) {
+    if (win.days === null) return [allTitle, allHint];
+    return [`No ${noun} in the ${win.chip}`, "Slide the window wider to include older history."];
   }
 
   function renderLegend(elementId, items) {
@@ -112,10 +147,11 @@
     return values.map((v) => (sum += v || 0));
   }
 
-  async function renderDistanceChart() {
-    const rows = await fetchJSON("/api/metrics/distance");
+  // Running totals start from 0 at the window's first drive, not from all-history totals — an
+  // all-history offset would just lift both lines by the same constant and flatten the gap.
+  function renderDistanceChart(rows, win) {
     if (!rows || rows.length === 0) {
-      showEmpty("chart-distance", "No completed drives yet", "Charts fill in once TeslaMate records a drive.");
+      showEmpty("chart-distance", ...emptyText(win, "drives", "No completed drives yet", "Charts fill in once TeslaMate records a drive."));
       return;
     }
     const legendEl = document.getElementById("legend-distance");
@@ -123,18 +159,15 @@
     const preTrackingDate = legendEl.dataset.preTrackingDate;
     renderLegend("legend-distance", [
       { label: "Odometer", color: palette.series1 },
-      { label: "OSRM route", color: palette.series2 },
       { label: "GPS trace", color: palette.series3 },
       { label: `Pre-tracking odometer: ${preTrackingMi} mi (${preTrackingDate})`, color: palette.baseline },
     ]);
-    const ctx = document.getElementById("chart-distance");
-    new Chart(ctx, {
+    mountChart("chart-distance", {
       type: "line",
       data: {
         labels: rows.map((r) => formatLabel(r.date)),
         datasets: [
           { label: "Odometer", data: cumulativeSum(rows.map((r) => r.odometer_mi)), borderColor: palette.series1, backgroundColor: palette.series1, borderWidth: 2, pointRadius: 2, pointHoverRadius: 5, tension: 0.25 },
-          { label: "OSRM route", data: cumulativeSum(rows.map((r) => r.osrm_mi)), borderColor: palette.series2, backgroundColor: palette.series2, borderWidth: 2, pointRadius: 2, pointHoverRadius: 5, tension: 0.25 },
           { label: "GPS trace", data: cumulativeSum(rows.map((r) => r.gps_mi)), borderColor: palette.series3, backgroundColor: palette.series3, borderWidth: 2, pointRadius: 2, pointHoverRadius: 5, tension: 0.25 },
         ],
       },
@@ -146,27 +179,21 @@
         plugins: { legend: { display: false }, tooltip: tooltipConfig() },
       },
     });
-    return rows;
   }
 
-  // Odometer (x) vs. OSRM / GPS traced distance (y), one point per drive, plus a y=x reference
-  // line — points on the line mean the traced distance matched the odometer exactly.
-  async function renderScatterChart(distanceRows) {
-    const rows = distanceRows || (await fetchJSON("/api/metrics/distance"));
+  // Odometer (x) vs. GPS traced distance (y), one point per drive, plus a y=x reference line —
+  // points on the line mean the traced distance matched the odometer exactly.
+  function renderScatterChart(rows, win) {
     if (!rows || rows.length === 0) {
-      showEmpty("chart-scatter", "No completed drives yet", "Charts fill in once TeslaMate records a drive.");
+      showEmpty("chart-scatter", ...emptyText(win, "drives", "No completed drives yet", "Charts fill in once TeslaMate records a drive."));
       return;
     }
-    renderLegend("legend-scatter", [
-      { label: "OSRM route", color: palette.series2, dot: true },
-      { label: "GPS trace", color: palette.series3, dot: true },
-    ]);
-    const allVals = rows.flatMap((r) => [r.odometer_mi, r.osrm_mi, r.gps_mi]).filter((v) => v !== null && v !== undefined);
+    renderLegend("legend-scatter", [{ label: "GPS trace", color: palette.series3, dot: true }]);
+    const allVals = rows.flatMap((r) => [r.odometer_mi, r.gps_mi]).filter((v) => v !== null && v !== undefined);
     const lo = Math.floor(Math.min(...allVals) - 0.5);
     const hi = Math.ceil(Math.max(...allVals) + 0.5);
 
-    const ctx = document.getElementById("chart-scatter");
-    new Chart(ctx, {
+    mountChart("chart-scatter", {
       type: "line",
       data: {
         datasets: [
@@ -181,16 +208,6 @@
             order: 3,
           },
           {
-            label: "OSRM route",
-            data: rows.map((r) => ({ x: r.odometer_mi, y: r.osrm_mi })),
-            borderColor: palette.series2,
-            backgroundColor: palette.series2,
-            showLine: false,
-            pointRadius: 4,
-            pointHoverRadius: 6,
-            order: 1,
-          },
-          {
             label: "GPS trace",
             data: rows.map((r) => ({ x: r.odometer_mi, y: r.gps_mi })),
             borderColor: palette.series3,
@@ -198,7 +215,7 @@
             showLine: false,
             pointRadius: 4,
             pointHoverRadius: 6,
-            order: 2,
+            order: 1,
           },
         ],
       },
@@ -226,23 +243,17 @@
     });
   }
 
-  async function renderDriftChart() {
-    const rows = await fetchJSON("/api/metrics/drift");
+  function renderDriftChart(rows, win) {
     if (!rows || rows.length === 0) {
-      showEmpty("chart-drift", "No drift data yet", "Shows up once a completed drive has both odometer and OSRM/GPS distance.");
+      showEmpty("chart-drift", ...emptyText(win, "drift data", "No drift data yet", "Shows up once a completed drive has both odometer and GPS distance."));
       return;
     }
-    renderLegend("legend-drift", [
-      { label: "OSRMDrift", color: palette.series2 },
-      { label: "GPSDrift", color: palette.series3 },
-    ]);
-    const ctx = document.getElementById("chart-drift");
-    new Chart(ctx, {
+    renderLegend("legend-drift", [{ label: "GPSDrift", color: palette.series3 }]);
+    mountChart("chart-drift", {
       type: "line",
       data: {
         labels: rows.map((r) => formatLabel(r.date)),
         datasets: [
-          { label: "OSRMDrift", data: rows.map((r) => r.osrm_drift_pct), borderColor: palette.series2, backgroundColor: palette.series2, borderWidth: 2, pointRadius: 2, pointHoverRadius: 5, tension: 0.25, spanGaps: true },
           { label: "GPSDrift", data: rows.map((r) => r.haversine_drift_pct), borderColor: palette.series3, backgroundColor: palette.series3, borderWidth: 2, pointRadius: 2, pointHoverRadius: 5, tension: 0.25, spanGaps: true },
         ],
       },
@@ -256,15 +267,13 @@
     });
   }
 
-  async function renderSingleLineChart(canvasId, url, field, opts) {
-    const rows = await fetchJSON(url);
+  function renderSingleLineChart(canvasId, rows, field, opts) {
     const values = (rows || []).filter((r) => r[field] !== null && r[field] !== undefined);
     if (values.length === 0) {
       showEmpty(canvasId, opts.emptyTitle, opts.emptyHint);
-      return null;
+      return;
     }
-    const ctx = document.getElementById(canvasId);
-    new Chart(ctx, {
+    mountChart(canvasId, {
       type: "line",
       data: {
         labels: rows.map((r) => formatLabel(r.date)),
@@ -289,18 +298,15 @@
         plugins: { legend: { display: false }, tooltip: tooltipConfig() },
       },
     });
-    return rows;
   }
 
-  async function renderBarChart(canvasId, url, field, opts) {
-    const rows = await fetchJSON(url);
+  function renderBarChart(canvasId, rows, field, opts) {
     const values = (rows || []).filter((r) => r[field] !== null && r[field] !== undefined);
     if (values.length === 0) {
       showEmpty(canvasId, opts.emptyTitle, opts.emptyHint);
       return;
     }
-    const ctx = document.getElementById(canvasId);
-    new Chart(ctx, {
+    mountChart(canvasId, {
       type: "bar",
       data: {
         labels: rows.map((r) => formatLabel(r.date)),
@@ -324,16 +330,17 @@
     });
   }
 
-  function renderDualSparkline(canvasId, rows, fieldA, colorA, fieldB, colorB) {
+  function renderSparkline(canvasId, rows, field, color) {
     const ctx = document.getElementById(canvasId);
-    if (!ctx || !rows || rows.length < 2) return;
+    if (!ctx) return;
+    Chart.getChart(ctx)?.destroy();
+    if (!rows || rows.length < 2) return;
     new Chart(ctx, {
       type: "line",
       data: {
         labels: rows.map((r) => r.date),
         datasets: [
-          { data: rows.map((r) => r[fieldA]), borderColor: colorA, borderWidth: 2, pointRadius: 0, tension: 0.3, spanGaps: true },
-          { data: rows.map((r) => r[fieldB]), borderColor: colorB, borderWidth: 2, pointRadius: 0, tension: 0.3, spanGaps: true },
+          { data: rows.map((r) => r[field]), borderColor: color, borderWidth: 2, pointRadius: 0, tension: 0.3, spanGaps: true },
         ],
       },
       options: {
@@ -356,9 +363,9 @@
     return Math.sqrt(variance);
   }
 
-  // Sets a KPI sub-row's value to the mean of every non-null `field` reading so far (all drives
-  // to date, not a fixed trailing window), and its delta to their sample standard deviation —
-  // how consistent that's been, not a change-vs-previous-drive.
+  // Sets a KPI sub-row's value to the mean of every non-null `field` reading in `rows` (every
+  // drive in the current chart window, or all history for the cumulative tile), and its delta to
+  // their sample standard deviation — how consistent that's been, not a change-vs-previous-drive.
   function setMeanStdevKpiValue(tile, valueSelector, deltaSelector, rows, field, formatValue, formatDelta) {
     const values = (rows || []).map((r) => r[field]).filter((v) => v !== null && v !== undefined);
     const valueEl = tile.querySelector(valueSelector);
@@ -375,42 +382,25 @@
     deltaEl.textContent = stdev === null ? "" : formatDelta(stdev);
   }
 
-  async function renderDriftKpi() {
-    const rows = await fetchJSON("/api/metrics/drift");
+  function renderDriftKpi(rows) {
     const tile = document.getElementById("kpi-drift");
     const fmtValue = (v) => `${v.toFixed(1)}%`;
     const fmtDelta = (v) => `±${v.toFixed(1)}pp`;
-    setMeanStdevKpiValue(tile, ".drift-value-osrm", ".drift-delta-osrm", rows, "osrm_drift_pct", fmtValue, fmtDelta);
-    setMeanStdevKpiValue(tile, ".drift-value-haversine", ".drift-delta-haversine", rows, "haversine_drift_pct", fmtValue, fmtDelta);
-    renderDualSparkline(
-      "kpi-drift-spark",
-      (rows || []).slice(-12),
-      "osrm_drift_pct",
-      palette.series2,
-      "haversine_drift_pct",
-      palette.series3
-    );
+    setMeanStdevKpiValue(tile, ".value", ".delta", rows, "haversine_drift_pct", fmtValue, fmtDelta);
+    renderSparkline("kpi-drift-spark", (rows || []).slice(-12), "haversine_drift_pct", palette.series3);
   }
 
+  // Always all history, whatever the window — see metrics.cumulative_drift_series.
   async function renderCumulativeDriftKpi() {
     const rows = await fetchJSON("/api/metrics/cumulative-drift");
     const tile = document.getElementById("kpi-cumulative-drift");
     const fmtValue = (v) => `${v.toFixed(1)}%`;
     const fmtDelta = (v) => `±${v.toFixed(1)}pp`;
-    setMeanStdevKpiValue(tile, ".cum-drift-value-osrm", ".cum-drift-delta-osrm", rows, "cum_osrm_drift_pct", fmtValue, fmtDelta);
-    setMeanStdevKpiValue(tile, ".cum-drift-value-gps", ".cum-drift-delta-gps", rows, "cum_gps_drift_pct", fmtValue, fmtDelta);
-    renderDualSparkline(
-      "kpi-cumulative-drift-spark",
-      (rows || []).slice(-12),
-      "cum_osrm_drift_pct",
-      palette.series2,
-      "cum_gps_drift_pct",
-      palette.series3
-    );
+    setMeanStdevKpiValue(tile, ".value", ".delta", rows, "cum_gps_drift_pct", fmtValue, fmtDelta);
+    renderSparkline("kpi-cumulative-drift-spark", (rows || []).slice(-12), "cum_gps_drift_pct", palette.series3);
   }
 
-  async function renderEfficiencyKpi() {
-    const rows = await fetchJSON("/api/metrics/energy-efficiency");
+  function renderEfficiencyKpi(rows) {
     const tile = document.getElementById("kpi-efficiency");
     setMeanStdevKpiValue(
       tile,
@@ -440,6 +430,97 @@
       pct >= 90 ? palette.statusGood : pct >= 70 ? palette.statusWarning : palette.statusCritical;
   }
 
+  // --- Chart window -------------------------------------------------------------------------
+
+  const slider = document.getElementById("window-slider");
+
+  // Starting stop: this browser's last choice, else the server's TESLOG_CHART_WINDOW_DAYS
+  // (0 = all history), else 90 days. Storage can be unavailable (private mode), so it's
+  // best-effort only.
+  function initialWindowIndex() {
+    try {
+      const raw = localStorage.getItem(WINDOW_STORAGE_KEY);
+      const stored = Number(raw);
+      if (raw !== null && Number.isInteger(stored) && stored >= 0 && stored < WINDOWS.length) return stored;
+    } catch {}
+    const serverDays = Number(document.querySelector(".window-control").dataset.defaultDays);
+    const idx = WINDOWS.findIndex((w) => (w.days ?? 0) === serverDays);
+    return idx >= 0 ? idx : DEFAULT_WINDOW_INDEX;
+  }
+
+  function saveWindowIndex(idx) {
+    try {
+      localStorage.setItem(WINDOW_STORAGE_KEY, String(idx));
+    } catch {}
+  }
+
+  function withWindow(url, win) {
+    return win.days === null ? url : `${url}?days=${win.days}`;
+  }
+
+  // Slider label, stop highlight and window chips — cheap, so updated live while dragging.
+  function renderWindowControls(win, idx) {
+    document.getElementById("window-name").textContent = win.name;
+    slider.setAttribute("aria-valuetext", win.name);
+    document.querySelectorAll(".window-stop").forEach((el, i) => el.classList.toggle("active", i === idx));
+    document.querySelectorAll(".window-chip:not(.all)").forEach((el) => (el.textContent = win.chip));
+  }
+
+  function renderWindowSummary(win, distance, charging) {
+    const today = new Date();
+    let start;
+    if (win.days !== null) {
+      start = new Date(today.getTime() - win.days * 864e5);
+    } else {
+      const dates = [...(distance || []), ...(charging || [])].map((r) => new Date(r.date));
+      start = dates.length ? new Date(Math.min(...dates)) : null;
+    }
+    const drives = (distance || []).length;
+    const charges = (charging || []).length;
+    const range = start ? `${formatLongDate(start)} – ${formatLongDate(today)}` : "all history";
+    document.getElementById("window-summary").textContent =
+      `Showing ${range} · ${drives} drive${drives === 1 ? "" : "s"} · ${charges} charge${charges === 1 ? "" : "s"}`;
+    document.getElementById("distance-desc").textContent = start
+      ? `Cumulative odometer vs. GPS trace, running total from ${formatLongDate(start)}`
+      : "Cumulative odometer vs. GPS trace, running total across drives";
+  }
+
+  // CSV downloads match what's on screen: same window as the charts.
+  function renderCsvLinks(win) {
+    document.querySelectorAll("a.csv-link").forEach((link) => {
+      link.dataset.baseHref ??= link.getAttribute("href");
+      link.setAttribute("href", withWindow(link.dataset.baseHref, win));
+    });
+  }
+
+  // Bumped per window change; a fetch that finishes after a newer change began is dropped, so a
+  // slow response for an old window can't overwrite the charts for the current one.
+  let windowGeneration = 0;
+
+  async function renderWindowed(win) {
+    const generation = ++windowGeneration;
+    renderCsvLinks(win);
+    const [distance, drift, energyUsed, efficiency, charging] = await Promise.all(
+      ["distance", "drift", "energy-used", "energy-efficiency", "charging-energy"].map((name) =>
+        fetchJSON(withWindow(`/api/metrics/${name}`, win))
+      )
+    );
+    if (generation !== windowGeneration) return;
+
+    renderWindowSummary(win, distance, charging);
+    renderDriftKpi(drift);
+    renderEfficiencyKpi(efficiency);
+    renderDistanceChart(distance, win);
+    renderScatterChart(distance, win);
+    renderDriftChart(drift, win);
+    const [energyTitle, energyHint] = emptyText(win, "energy data", "No energy data yet", "Needs completed drives and a car with a learned rated efficiency.");
+    renderBarChart("chart-energy-used", energyUsed, "kwh_used", { unit: "kWh", emptyTitle: energyTitle, emptyHint: energyHint });
+    const [effTitle, effHint] = emptyText(win, "efficiency data", "No efficiency data yet", "Needs completed drives and a car with a learned rated efficiency.");
+    renderSingleLineChart("chart-energy-efficiency", efficiency, "wh_per_mi", { unit: "Wh/mi", emptyTitle: effTitle, emptyHint: effHint });
+    const [chargeTitle, chargeHint] = emptyText(win, "charging sessions", "No charging sessions yet", "Shows up once TeslaMate records a completed charge.");
+    renderBarChart("chart-charging-energy", charging, "kwh_added", { unit: "kWh", emptyTitle: chargeTitle, emptyHint: chargeHint });
+  }
+
   async function handleSync() {
     const btn = document.getElementById("sync-btn");
     btn.disabled = true;
@@ -453,26 +534,23 @@
 
   document.getElementById("sync-btn").addEventListener("click", handleSync);
 
-  renderDriftKpi();
-  renderCumulativeDriftKpi();
-  renderEfficiencyKpi();
-  renderBatteryHealthKpi();
+  const startIdx = initialWindowIndex();
+  slider.value = String(startIdx);
+  renderWindowControls(WINDOWS[startIdx], startIdx);
 
-  renderDistanceChart().then((rows) => renderScatterChart(rows));
-  renderDriftChart();
-  renderBarChart("chart-energy-used", "/api/metrics/energy-used", "kwh_used", {
-    unit: "kWh",
-    emptyTitle: "No energy data yet",
-    emptyHint: "Needs completed drives and a car with a learned rated efficiency.",
+  // `input` fires continuously while dragging (labels only); `change` fires once the thumb
+  // settles on a stop (mouse release, or each arrow-key step) — that's when charts refetch.
+  slider.addEventListener("input", () => {
+    const idx = Number(slider.value);
+    renderWindowControls(WINDOWS[idx], idx);
   });
-  renderSingleLineChart("chart-energy-efficiency", "/api/metrics/energy-efficiency", "wh_per_mi", {
-    unit: "Wh/mi",
-    emptyTitle: "No efficiency data yet",
-    emptyHint: "Needs completed drives and a car with a learned rated efficiency.",
+  slider.addEventListener("change", () => {
+    const idx = Number(slider.value);
+    saveWindowIndex(idx);
+    renderWindowed(WINDOWS[idx]);
   });
-  renderBarChart("chart-charging-energy", "/api/metrics/charging-energy", "kwh_added", {
-    unit: "kWh",
-    emptyTitle: "No charging sessions yet",
-    emptyHint: "Shows up once TeslaMate records a completed charge.",
-  });
+
+  renderCumulativeDriftKpi();
+  renderBatteryHealthKpi();
+  renderWindowed(WINDOWS[startIdx]);
 })();

@@ -17,7 +17,7 @@ VENV_TEST=".venv-test"
 
 COMPOSE=(docker compose --env-file .env -f docker/compose.yml)
 CRON_TAG="# teslog-drive-export"
-EXPORT_HOURS_DEFAULT="24"
+EXPORT_SCHEDULE_DEFAULT="weekly"
 EXPORT_LOCATION_DEFAULT="teslog"
 PI_ROOT_DEFAULT="teslog"
 
@@ -39,17 +39,28 @@ set_env() {
     rm -f "${ENV_FILE}.bak"
 }
 
+# Named export schedule -> cron time fields. Named rather than an hour count because cron's
+# `*/N` hour step only works within 0-23: `*/168` silently fires daily, not weekly.
+export_cron_expr() {
+    case "$1" in
+        daily)  echo "0 3 * * *" ;;  # every day, 03:00
+        weekly) echo "0 3 * * 0" ;;  # Sundays, 03:00
+        *)      return 1 ;;
+    esac
+}
+
 # Installs/replaces the single teslog-drive-export cron line (tagged so it can be found and
 # replaced idempotently without touching any of the user's other cron entries).
 install_export_cron() {
-    local hours="$1" repo_dir
+    local cron_expr repo_dir
+    cron_expr="$(export_cron_expr "$1")"
     repo_dir="$(pwd)"
     # The `|| true` matters: with no pre-existing crontab (a fresh Pi, or one where this is the
     # only cron job ever installed), `crontab -l` and/or `grep -vF` finding nothing to keep both
     # exit non-zero — under `set -e` that would abort this function before the line below ever
     # gets written, silently leaving nothing scheduled.
     { crontab -l 2>/dev/null | grep -vF "$CRON_TAG" || true
-      echo "0 */${hours} * * * cd ${repo_dir} && ./scripts/export-to-drive.sh >> drive-export.log 2>&1 ${CRON_TAG}"
+      echo "${cron_expr} cd ${repo_dir} && ./scripts/export-to-drive.sh >> drive-export.log 2>&1 ${CRON_TAG}"
     } | crontab -
 }
 
@@ -72,7 +83,7 @@ Commands:
           (needs an rclone 'gdrive' remote already configured on this
           machine — see README.md). Optional flags, persisted into .env so
           a later plain 'up' remembers them:
-            --export-hours N      how often, in hours (default $EXPORT_HOURS_DEFAULT)
+            --export-schedule S    daily|weekly (default $EXPORT_SCHEDULE_DEFAULT; weekly = Sundays 03:00)
             --export-location DIR  folder in the gdrive remote (default $EXPORT_LOCATION_DEFAULT)
   down    Stop the stack and remove the Google Drive export cron job (a
           later 'up' reinstalls it).
@@ -87,7 +98,7 @@ Examples:
   ./teslog.sh setup                                            # generate config + sign in to TeslaMate
   ./scripts/migrate-to-pi.sh user@pi-host                      # copy that onto a Pi (~/$PI_ROOT_DEFAULT there)
   ssh user@pi-host 'cd ~/$PI_ROOT_DEFAULT && ./teslog.sh up'    # start serving, on the Pi
-  ssh user@pi-host 'cd ~/$PI_ROOT_DEFAULT && ./teslog.sh up --export-hours 12 --export-location backups'
+  ssh user@pi-host 'cd ~/$PI_ROOT_DEFAULT && ./teslog.sh up --export-schedule daily --export-location backups'
   ssh user@pi-host 'cd ~/$PI_ROOT_DEFAULT && ./teslog.sh update'  # deploy a code change, on the Pi
   ./teslog.sh down                                             # stop (on whichever machine is running it)
 EOF
@@ -150,11 +161,15 @@ if [[ "$COMMAND" == "up" ]]; then
     fi
 
     shift
-    export_hours="" export_location=""
+    export_schedule="" export_location=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --export-hours)
-                export_hours="${2:?--export-hours needs a value}"
+            --export-schedule)
+                export_schedule="${2:?--export-schedule needs a value}"
+                if ! export_cron_expr "$export_schedule" >/dev/null; then
+                    echo "Unknown --export-schedule '$export_schedule' (expected daily or weekly)." >&2
+                    exit 1
+                fi
                 shift 2
                 ;;
             --export-location)
@@ -167,21 +182,27 @@ if [[ "$COMMAND" == "up" ]]; then
                 ;;
         esac
     done
-    [[ -n "$export_hours" ]] && set_env "TESLOG_EXPORT_FREQUENCY_HOURS" "$export_hours"
+    [[ -n "$export_schedule" ]] && set_env "TESLOG_EXPORT_SCHEDULE" "$export_schedule"
     [[ -n "$export_location" ]] && set_env "TESLOG_EXPORT_LOCATION" "$export_location"
 
-    resolved_hours=$(get_env "TESLOG_EXPORT_FREQUENCY_HOURS")
+    # An older .env may still carry TESLOG_EXPORT_FREQUENCY_HOURS from before schedules were
+    # named — it's ignored, so such a setup lands on the weekly default.
+    resolved_schedule=$(get_env "TESLOG_EXPORT_SCHEDULE")
     resolved_location=$(get_env "TESLOG_EXPORT_LOCATION")
-    resolved_hours="${resolved_hours:-$EXPORT_HOURS_DEFAULT}"
+    resolved_schedule="${resolved_schedule:-$EXPORT_SCHEDULE_DEFAULT}"
     resolved_location="${resolved_location:-$EXPORT_LOCATION_DEFAULT}"
+    if ! export_cron_expr "$resolved_schedule" >/dev/null; then
+        echo "TESLOG_EXPORT_SCHEDULE='$resolved_schedule' in $ENV_FILE isn't daily or weekly — using $EXPORT_SCHEDULE_DEFAULT." >&2
+        resolved_schedule="$EXPORT_SCHEDULE_DEFAULT"
+    fi
 
     "${COMPOSE[@]}" up -d
-    install_export_cron "$resolved_hours"
+    install_export_cron "$resolved_schedule"
 
     echo
     echo "== Teslog is running =="
     echo "  Teslog dashboard: http://localhost:8080"
-    echo "  Google Drive export: every ${resolved_hours}h to gdrive:${resolved_location}/"
+    echo "  Google Drive export: ${resolved_schedule} to gdrive:${resolved_location}/"
     echo "    (needs the 'gdrive' rclone remote configured — see README.md; if it isn't yet,"
     echo "     the export just logs and skips itself each run until you run 'rclone config')"
     exit 0
@@ -271,9 +292,9 @@ set_env "TESLOG_CAR_ID" "$car_id"
 osrm_url=$(prompt_default "OSRM routing server (public demo server is fine for light personal use)" "https://router.project-osrm.org")
 set_env "OSRM_BASE_URL" "$osrm_url"
 
-# Not asked here — these are only ever adjusted via 'up's --export-hours/--export-location
+# Not asked here — these are only ever adjusted via 'up's --export-schedule/--export-location
 # flags (which persist back into .env themselves). Defaulted here just so they're always set.
-set_env "TESLOG_EXPORT_FREQUENCY_HOURS" "$EXPORT_HOURS_DEFAULT"
+set_env "TESLOG_EXPORT_SCHEDULE" "$EXPORT_SCHEDULE_DEFAULT"
 set_env "TESLOG_EXPORT_LOCATION" "$EXPORT_LOCATION_DEFAULT"
 
 # Also not asked — scripts/migrate-to-pi.sh's destination on the Pi (~/$PI_ROOT_DEFAULT there).

@@ -54,7 +54,7 @@ body {
 header {
   padding: 1.5rem 0 1rem;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 1rem;
   flex-wrap: wrap;
@@ -94,6 +94,95 @@ button:hover {
 button:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+/* Header controls: chart-window slider + Sync button */
+
+.header-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+}
+
+.window-control {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+}
+
+.window-label {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.window-label strong {
+  color: var(--text-primary);
+  display: inline-block;
+  min-width: 5.5em;
+}
+
+.window-track {
+  width: 15rem;
+  padding: 0 0.55rem;
+}
+
+.window-track input[type="range"] {
+  display: block;
+  width: 100%;
+  margin: 0;
+  min-height: 1.9rem;
+  accent-color: var(--series-1);
+}
+
+/* Stop labels sit under the thumb's centre at each step; inset by roughly half the thumb's
+   width, since the thumb's centre never reaches the track's very edges. */
+.window-stops {
+  position: relative;
+  height: 1rem;
+  margin: -0.15rem 0.5rem 0;
+}
+
+.window-stop {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.window-stop.active {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.window-summary {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  margin-bottom: 1.1rem;
+}
+
+.window-chip {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--series-1) 14%, var(--surface-1));
+  color: var(--text-primary);
+  margin-left: 0.3rem;
+  vertical-align: 0.05rem;
+}
+
+.window-chip:empty {
+  display: none;
+}
+
+.window-chip.all {
+  background: color-mix(in srgb, var(--text-muted) 18%, var(--surface-1));
+  color: var(--text-secondary);
 }
 
 /* KPI row */
@@ -153,42 +242,6 @@ button:disabled {
   font-size: 0.72rem;
   color: var(--text-muted);
   margin-top: 0.5rem;
-}
-
-/* Drift KPI tile: two color-coded values (OSRM, GPS) instead of one */
-
-.drift-kpi {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-}
-
-.drift-kpi-row {
-  display: flex;
-  align-items: baseline;
-  gap: 0.45rem;
-}
-
-.drift-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  align-self: center;
-}
-
-.drift-kpi-name {
-  font-size: 0.78rem;
-  color: var(--text-secondary);
-  width: 4.5rem;
-}
-
-.stat-tile .drift-kpi .value {
-  font-size: 1.3rem;
-}
-
-.stat-tile .drift-kpi .delta {
-  font-size: 0.78rem;
 }
 
 /* Meter (battery health) */
